@@ -71,6 +71,9 @@ type
     function DoIdentificarConsumidor(const AData: string): string;
     function DoVincularCliente(const AData: string): string;
 
+    // Vendedor
+    function DoBuscarVendedor(const AData: string): string;
+
     // Pre-Venda
     function DoListarPreVendas(const AData: string): string;
     function DoImportarPreVenda(const AData: string): string;
@@ -168,6 +171,8 @@ begin
     else if AAction = 'buscarCliente' then Result := DoBuscarCliente(AData)
     else if AAction = 'identificarConsumidor' then Result := DoIdentificarConsumidor(AData)
     else if AAction = 'vincularCliente' then Result := DoVincularCliente(AData)
+    // Vendedor
+    else if AAction = 'buscarVendedor' then Result := DoBuscarVendedor(AData)
     // Pre-venda
     else if AAction = 'listarPreVendas' then Result := DoListarPreVendas(AData)
     else if AAction = 'importarPreVenda' then Result := DoImportarPreVenda(AData)
@@ -684,7 +689,8 @@ begin
           RoundTo(LValorTotal * LQuery.FieldByName('pis_ppis').AsFloat / 100, -2),
           RoundTo(LValorTotal * LQuery.FieldByName('cofins_pcofins').AsFloat / 100, -2),
           RoundTo(LValorTotal * LQuery.FieldByName('impleitransparencia').AsFloat / 100, -2),
-          LJson.GetValue<Integer>('codvendedor', 0),
+          IfThen(LJson.GetValue<Integer>('codvendedor', 0) > 0,
+            LJson.GetValue<Integer>('codvendedor', 0), FMatriculaLogada),
           IfThen((LQuery.FieldByName('poferta').AsFloat > 0) and
             (LQuery.FieldByName('dtfimoferta').AsString >= FormatDateTime('yyyy-mm-dd', Now)), 'S', 'N'),
           LQuery.FieldByName('pvenda').AsFloat,
@@ -1506,6 +1512,42 @@ begin
         LQuery.Next;
       end;
       Result := CriarRespostaSucesso('OK', LArr);
+    finally
+      LQuery.Free;
+    end;
+  finally
+    LJson.Free;
+  end;
+end;
+
+function TApoloBridge.DoBuscarVendedor(const AData: string): string;
+var
+  LJson: TJSONObject;
+  LMatricula: Integer;
+  LQuery: TUniQuery;
+  LDados: TJSONObject;
+begin
+  LJson := TJSONObject.ParseJSONValue(AData) as TJSONObject;
+  if LJson = nil then Exit(CriarRespostaErro('Dados invalidos'));
+
+  try
+    LMatricula := LJson.GetValue<Integer>('matricula', 0);
+    if LMatricula = 0 then
+      Exit(CriarRespostaErro('Informe a matricula'));
+
+    LQuery := FSQLite.ExecutarSelect(
+      'SELECT matricula, nome FROM funcionarios WHERE matricula = ' +
+      IntToStr(LMatricula)
+    );
+    try
+      if LQuery.IsEmpty then
+        Exit(CriarRespostaErro('Vendedor nao encontrado'));
+
+      LDados := TJSONObject.Create;
+      LDados.AddPair('matricula', TJSONNumber.Create(LMatricula));
+      LDados.AddPair('nome', LQuery.FieldByName('nome').AsString);
+
+      Result := CriarRespostaSucesso('OK', LDados);
     finally
       LQuery.Free;
     end;

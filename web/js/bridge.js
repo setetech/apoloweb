@@ -179,6 +179,11 @@ const Bridge = {
     return this.call('vincularCliente', { codcli });
   },
 
+  // Vendedor
+  async buscarVendedor(matricula) {
+    return this.call('buscarVendedor', { matricula });
+  },
+
   // Pre-venda
   async listarPreVendas() {
     return this.call('listarPreVendas', {});

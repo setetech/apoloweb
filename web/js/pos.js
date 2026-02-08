@@ -21,7 +21,6 @@ const POS = {
 
     // Capturar "*" via keydown (teclado normal e numpad)
     barcodeInput.addEventListener('keydown', (e) => {
-      console.log('KEYDOWN:', 'key=' + e.key, 'code=' + e.code, 'keyCode=' + e.keyCode, 'value=' + barcodeInput.value);
       if (e.key === '*' || e.key === 'Multiply') {
         e.preventDefault();
         e.stopPropagation();
@@ -36,7 +35,6 @@ const POS = {
 
     // Fallback: se o "*" passar para o valor do input (WebView2/teclado ABNT2)
     barcodeInput.addEventListener('input', () => {
-      console.log('INPUT event:', 'value=' + barcodeInput.value);
       const val = barcodeInput.value;
       if (val.includes('*')) {
         const partes = val.split('*');
@@ -56,6 +54,23 @@ const POS = {
     // Botao de busca
     document.getElementById('btn-search-product').addEventListener('click', () => {
       Products.open();
+    });
+
+    // Vendedor - buscar nome ao sair do campo
+    const vendedorInput = document.getElementById('input-vendedor');
+    vendedorInput.addEventListener('change', async () => {
+      const nomeEl = document.getElementById('vendedor-nome');
+      const mat = parseInt(vendedorInput.value) || 0;
+      if (mat > 0) {
+        const resp = await Bridge.buscarVendedor(mat);
+        if (resp && resp.sucesso) {
+          nomeEl.textContent = resp.dados.nome;
+        } else {
+          nomeEl.textContent = '';
+        }
+      } else {
+        nomeEl.textContent = '';
+      }
     });
   },
 
@@ -174,8 +189,9 @@ const POS = {
       if (qtde <= 0) { Toast.error('Quantidade invalida'); return; }
     }
 
-    // Adicionar item
-    const itemResp = await Bridge.adicionarItem(produto.codprod, qtde);
+    // Adicionar item (com vendedor, se informado)
+    const codVendedor = parseInt(document.getElementById('input-vendedor').value) || 0;
+    const itemResp = await Bridge.adicionarItem(produto.codprod, qtde, 0, codVendedor);
     if (!itemResp || !itemResp.sucesso) return;
 
     // Resetar quantidade pendente para 1

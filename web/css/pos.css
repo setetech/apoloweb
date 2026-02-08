@@ -207,6 +207,40 @@
   color: var(--accent-warning);
 }
 
+/* Vendedor */
+.vendedor-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.vendedor-row label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  margin: 0;
+}
+.vendedor-row input {
+  width: 80px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  -moz-appearance: textfield;
+}
+.vendedor-row input::-webkit-outer-spin-button,
+.vendedor-row input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.vendedor-nome {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
 /* Payment summary */
 .payment-summary-card {
   padding: 20px;
