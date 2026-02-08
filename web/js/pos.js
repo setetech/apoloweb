@@ -18,16 +18,36 @@ const POS = {
   _bindEvents() {
     // Input de barcode
     const barcodeInput = document.getElementById('barcode-input');
+
+    // Capturar "*" via keydown (teclado normal e numpad)
     barcodeInput.addEventListener('keydown', (e) => {
-      // Tecla "*" define a quantidade
-      if (e.key === '*') {
+      if (e.key === '*' || e.key === 'Multiply') {
         e.preventDefault();
+        e.stopPropagation();
         this._processarQuantidade(barcodeInput);
         return;
       }
       if (e.key === 'Enter' && barcodeInput.value.trim()) {
         e.preventDefault();
         this.processarCodigo(barcodeInput.value.trim());
+      }
+    });
+
+    // Fallback: se o "*" passar para o valor do input (WebView2/teclado ABNT2)
+    barcodeInput.addEventListener('input', () => {
+      const val = barcodeInput.value;
+      if (val.includes('*')) {
+        const partes = val.split('*');
+        const qtdStr = partes[0].trim();
+        const restante = partes.slice(1).join('').trim();
+
+        if (qtdStr) {
+          const qtde = Utils.parseMoney(qtdStr);
+          if (qtde > 0) {
+            this._setQuantidadePendente(qtde);
+          }
+        }
+        barcodeInput.value = restante;
       }
     });
 
