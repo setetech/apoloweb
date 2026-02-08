@@ -337,7 +337,7 @@ begin
   try
     LQuery.Connection := AConn;
     LQuery.SQL.Text :=
-      'SELECT matricula, nome, ofuscar(senhadb,usuariodb) senhadb, usuariodb, cargo FROM msfunc ' +
+      'SELECT matricula, nome, ofuscar(senhadb,usuariodb) senhadb, usuariodb, cargo, ind_vendedor FROM msfunc ' +
       'WHERE dtexclusao IS NULL AND ''S'' IN (ind_supervisor_cx, ind_operador_cx, ind_vendedor)';
     LQuery.Open;
 
@@ -347,10 +347,10 @@ begin
       while not LQuery.Eof do
       begin
         FSQLite.ExecutarSQL(
-          'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo) VALUES (:p0,:p1,:p2,:p3,:p4)',
+          'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo, ind_vendedor) VALUES (:p0,:p1,:p2,:p3,:p4,:p5)',
           [LQuery.FieldByName('matricula').AsInteger, LQuery.FieldByName('nome').AsString,
            LQuery.FieldByName('senhadb').AsString, LQuery.FieldByName('usuariodb').AsString,
-           LQuery.FieldByName('cargo').AsString]
+           LQuery.FieldByName('cargo').AsString, LQuery.FieldByName('ind_vendedor').AsString]
         );
         LQuery.Next;
       end;

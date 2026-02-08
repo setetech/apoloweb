@@ -50,6 +50,7 @@ const Utils = {
   // Mascara de moeda no input
   applyCurrencyMask(input) {
     input.addEventListener('input', function (e) {
+      if (this.dataset.masked === '0') return;
       let value = e.target.value.replace(/\D/g, '');
       value = (parseInt(value) / 100).toFixed(2);
       if (isNaN(value) || value === 'NaN') value = '0.00';
@@ -57,10 +58,12 @@ const Utils = {
     });
 
     input.addEventListener('focus', function () {
+      if (this.dataset.masked === '0') return;
       if (this.value === '0,00') this.value = '';
     });
 
     input.addEventListener('blur', function () {
+      if (this.dataset.masked === '0') return;
       if (!this.value) this.value = '0,00';
     });
   },

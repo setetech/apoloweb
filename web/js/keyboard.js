@@ -120,7 +120,7 @@ const Modal = {
 const Dialog = {
   _resolve: null,
 
-  async prompt(title, message, inputLabel = '', defaultValue = '') {
+  async prompt(title, message, inputLabel = '', defaultValue = '', useMask = true) {
     return new Promise((resolve) => {
       this._resolve = resolve;
 
@@ -129,6 +129,14 @@ const Dialog = {
 
       const inputGroup = document.getElementById('dialog-input-group');
       const input = document.getElementById('dialog-input');
+
+      // Ativar/desativar mascara monetaria
+      input.dataset.masked = useMask ? '1' : '0';
+      if (useMask) {
+        input.classList.add('input-currency');
+      } else {
+        input.classList.remove('input-currency');
+      }
 
       if (inputLabel) {
         inputGroup.classList.remove('hidden');

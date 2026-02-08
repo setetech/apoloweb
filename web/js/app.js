@@ -110,13 +110,18 @@ const ApoloApp = {
         } else {
           // Caixa ja aberto - ir para PDV
           this.showView('view-pos');
-          // Mapear estado: 1=livre, 2=registrando, 3=pagamento
-          const estados = { 1: 'livre', 2: 'registrando', 3: 'pagamento' };
-          POS.setEstado(estados[dados.estadoCaixa] || 'livre');
-          // Se havia venda em andamento, recarregar itens
-          if (dados.estadoCaixa >= 2) {
-            POS.recarregarItens();
-            POS.atualizarResumo();
+          // Restaurar venda em andamento (recuperacao apos queda)
+          if (dados.estadoCaixa >= 2 && dados.cupomAtualId > 0) {
+            const estado = await Bridge.obterEstadoCaixa();
+            if (estado && estado.sucesso && estado.dados.cupomAtualId > 0) {
+              const numCupom = estado.dados.numCupom || 0;
+              const estados = { 2: 'registrando', 3: 'pagamento' };
+              POS.restaurarVenda(estado.dados.cupomAtualId, numCupom, estados[dados.estadoCaixa]);
+            } else {
+              POS.setEstado('livre');
+            }
+          } else {
+            POS.setEstado('livre');
           }
         }
       } else {
@@ -169,11 +174,12 @@ const ApoloApp = {
         if (data.operador && data.estadoCaixa > 0) {
           POS.setHeaderInfo(data.numCaixa, data.operador);
           this.showView('view-pos');
-          const estados = { 1: 'livre', 2: 'registrando', 3: 'pagamento' };
-          POS.setEstado(estados[data.estadoCaixa] || 'livre');
-          if (data.estadoCaixa >= 2) {
-            POS.recarregarItens();
-            POS.atualizarResumo();
+          // Restaurar venda em andamento (recuperacao apos queda)
+          if (data.estadoCaixa >= 2 && data.cupomAtualId > 0) {
+            const estados = { 2: 'registrando', 3: 'pagamento' };
+            POS.restaurarVenda(data.cupomAtualId, data.numCupomVenda || 0, estados[data.estadoCaixa]);
+          } else {
+            POS.setEstado('livre');
           }
         }
         break;

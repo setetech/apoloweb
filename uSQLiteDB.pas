@@ -44,7 +44,7 @@ type
   end;
 
 const
-  SCHEMA_VERSION = 5;
+  SCHEMA_VERSION = 6;
 
 implementation
 
@@ -347,7 +347,8 @@ begin
     '  nome TEXT NOT NULL,' +
     '  senhadb TEXT,' +
     '  usuario TEXT,' +
-    '  cargo TEXT' +
+    '  cargo TEXT,' +
+    '  ind_vendedor TEXT DEFAULT ''N''' +
     ')'
   );
 
@@ -796,12 +797,12 @@ begin
   // Senha de teste: '1' para todos
   // admin/1, caixa/1
   ExecutarSQL(
-    'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo) VALUES ' +
-    '(1, ''Administrador'', ''' + Ofuscar('1', 'admin') + ''', ''admin'', ''Gerente'')'
+    'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo, ind_vendedor) VALUES ' +
+    '(1, ''Administrador'', ''' + Ofuscar('1', 'admin') + ''', ''admin'', ''Gerente'', ''S'')'
   );
   ExecutarSQL(
-    'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo) VALUES ' +
-    '(2, ''Operador Caixa'', ''' + Ofuscar('1', 'caixa') + ''', ''caixa'', ''Caixa'')'
+    'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo, ind_vendedor) VALUES ' +
+    '(2, ''Operador Caixa'', ''' + Ofuscar('1', 'caixa') + ''', ''caixa'', ''Caixa'', ''N'')'
   );
 
   // === PERMISSOES ===

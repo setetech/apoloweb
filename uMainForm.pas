@@ -228,6 +228,7 @@ procedure TFrmMain.InicializarSistema;
 var
   LEstado: string;
   LJson: TJSONObject;
+  LNumCupom: Variant;
 begin
   // Enviar informacoes iniciais para o frontend
   LJson := TJSONObject.Create;
@@ -241,6 +242,19 @@ begin
     LJson.AddPair('codFilial', FSQLite.ObterEstado(KEY_CODFILIAL, ''));
     LJson.AddPair('hdSerial', FSQLite.ObterEstado(KEY_HD_SERIAL, ''));
     LJson.AddPair('operador', FSQLite.ObterEstado(KEY_OPERADOR, ''));
+
+    // Dados da venda em andamento (recuperacao apos queda)
+    LJson.AddPair('cupomAtualId', TJSONNumber.Create(FBridge.CupomAtualId));
+    if FBridge.CupomAtualId > 0 then
+    begin
+      LNumCupom := FSQLite.ExecutarScalar(
+        'SELECT numcupom FROM cupons WHERE id = ' + IntToStr(FBridge.CupomAtualId)
+      );
+      if not VarIsNull(LNumCupom) then
+        LJson.AddPair('numCupomVenda', TJSONNumber.Create(Integer(LNumCupom)))
+      else
+        LJson.AddPair('numCupomVenda', TJSONNumber.Create(0));
+    end;
 
     EnviarParaJS('init', LJson.ToJSON);
   finally

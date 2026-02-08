@@ -314,7 +314,7 @@ const POS = {
 
   async cancelarItem() {
     if (this.estado !== 'registrando') return;
-    const seq = await Dialog.prompt('Cancelar Item', 'Informe o numero do item:', 'Num. Item', '');
+    const seq = await Dialog.prompt('Cancelar Item', 'Informe o numero do item:', 'Num. Item', '', false);
     if (seq) {
       const resp = await Bridge.removerItem(parseInt(seq));
       if (resp && resp.sucesso) {
@@ -402,6 +402,16 @@ const POS = {
   voltarBarcode() {
     const input = document.getElementById('barcode-input');
     if (input) { input.value = ''; input.focus(); }
+  },
+
+  // Restaurar venda em andamento (recuperacao apos queda de energia)
+  async restaurarVenda(cupomId, numCupom, estado) {
+    this.cupomId = cupomId;
+    this.numCupom = numCupom;
+    this.setEstado(estado || 'registrando');
+    await this.recarregarItens();
+    await this.atualizarResumo();
+    Toast.info('Venda #' + numCupom + ' restaurada');
   },
 
   // Finalizar venda (chamado pelo Payment)

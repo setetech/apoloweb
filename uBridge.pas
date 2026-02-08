@@ -122,6 +122,23 @@ begin
   );
   FMatriculaLogada := StrToIntDef(FSQLite.ObterEstado(KEY_MATRICULA, '0'), 0);
   FNomeOperador := FSQLite.ObterEstado(KEY_OPERADOR, '');
+
+  // Restaurar venda em andamento (recuperacao apos queda de energia)
+  if FEstadoCaixa in [ecRegistrando, ecPagamento] then
+  begin
+    var LCupomId: Variant;
+    LCupomId := FSQLite.ExecutarScalar(
+      'SELECT id FROM cupons WHERE dthrfimvenda IS NULL AND codoper <> ''C'' ORDER BY id DESC LIMIT 1'
+    );
+    if not VarIsNull(LCupomId) and not VarIsEmpty(LCupomId) then
+      FCupomAtualId := Integer(LCupomId)
+    else
+    begin
+      // Estado inconsistente - nao ha cupom ativo, resetar para livre
+      FEstadoCaixa := ecLivre;
+      FSQLite.SalvarEstado(KEY_ESTADO, IntToStr(Ord(FEstadoCaixa)));
+    end;
+  end;
 end;
 
 destructor TApoloBridge.Destroy;
@@ -277,6 +294,7 @@ begin
       LDados.AddPair('nome', LQuery.FieldByName('nome').AsString);
       LDados.AddPair('cargo', LQuery.FieldByName('cargo').AsString);
       LDados.AddPair('estadoCaixa', TJSONNumber.Create(Ord(FEstadoCaixa)));
+      LDados.AddPair('cupomAtualId', TJSONNumber.Create(FCupomAtualId));
 
       Result := CriarRespostaSucesso('Login realizado com sucesso', LDados);
     finally
@@ -1237,6 +1255,7 @@ end;
 function TApoloBridge.DoObterEstadoCaixa(const AData: string): string;
 var
   LDados: TJSONObject;
+  LNumCupom: Variant;
 begin
   LDados := TJSONObject.Create;
   LDados.AddPair('estado', TJSONNumber.Create(Ord(FEstadoCaixa)));
@@ -1248,6 +1267,18 @@ begin
     StrToFloatDef(FSQLite.ObterEstado(KEY_TOTAL_DINHEIRO, '0'), 0)));
   LDados.AddPair('contingencia', FContingencia.ToString);
   LDados.AddPair('cupomAtualId', TJSONNumber.Create(FCupomAtualId));
+
+  // Incluir numCupom da venda em andamento
+  if FCupomAtualId > 0 then
+  begin
+    LNumCupom := FSQLite.ExecutarScalar(
+      'SELECT numcupom FROM cupons WHERE id = ' + IntToStr(FCupomAtualId)
+    );
+    if not VarIsNull(LNumCupom) then
+      LDados.AddPair('numCupom', TJSONNumber.Create(Integer(LNumCupom)))
+    else
+      LDados.AddPair('numCupom', TJSONNumber.Create(0));
+  end;
 
   Result := CriarRespostaSucesso('OK', LDados);
 end;
@@ -1537,7 +1568,7 @@ begin
 
     LQuery := FSQLite.ExecutarSelect(
       'SELECT matricula, nome FROM funcionarios WHERE matricula = ' +
-      IntToStr(LMatricula)
+      IntToStr(LMatricula) + ' AND ind_vendedor = ''S'''
     );
     try
       if LQuery.IsEmpty then
