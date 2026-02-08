@@ -21,6 +21,7 @@ const POS = {
 
     // Capturar "*" via keydown (teclado normal e numpad)
     barcodeInput.addEventListener('keydown', (e) => {
+      console.log('KEYDOWN:', 'key=' + e.key, 'code=' + e.code, 'keyCode=' + e.keyCode, 'value=' + barcodeInput.value);
       if (e.key === '*' || e.key === 'Multiply') {
         e.preventDefault();
         e.stopPropagation();
@@ -35,6 +36,7 @@ const POS = {
 
     // Fallback: se o "*" passar para o valor do input (WebView2/teclado ABNT2)
     barcodeInput.addEventListener('input', () => {
+      console.log('INPUT event:', 'value=' + barcodeInput.value);
       const val = barcodeInput.value;
       if (val.includes('*')) {
         const partes = val.split('*');
