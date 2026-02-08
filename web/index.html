@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApoloWeb - Frente de Caixa</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/pos.css">
+  <link rel="stylesheet" href="css/dialogs.css">
+  <link rel="stylesheet" href="css/animations.css">
+</head>
+<body>
+  <!-- ===== TELA DE LOGIN ===== -->
+  <div id="view-login" class="view active">
+    <div class="login-container">
+      <div class="login-logo">
+        <svg class="logo-icon" viewBox="0 0 60 60" width="80" height="80">
+          <circle cx="30" cy="30" r="28" fill="none" stroke="var(--accent-primary)" stroke-width="2"/>
+          <text x="30" y="38" text-anchor="middle" fill="var(--accent-primary)" font-size="24" font-weight="bold">A</text>
+        </svg>
+        <h1 class="login-title">ApoloWeb</h1>
+        <p class="login-subtitle">Frente de Caixa</p>
+      </div>
+      <form id="login-form" class="login-form" onsubmit="return false;">
+        <div class="input-group">
+          <label for="login-matricula">Matricula</label>
+          <input type="number" id="login-matricula" placeholder="Informe a matricula" autofocus>
+        </div>
+        <div class="input-group">
+          <label for="login-senha">Senha</label>
+          <input type="password" id="login-senha" placeholder="Informe a senha">
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg" id="btn-login">Entrar</button>
+        <p id="login-error" class="error-msg hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== TELA DE ABERTURA DO CAIXA ===== -->
+  <div id="view-abertura" class="view">
+    <div class="abertura-container">
+      <div class="abertura-header">
+        <svg class="icon-cash" viewBox="0 0 24 24" width="48" height="48">
+          <path fill="var(--accent-success)" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm0-4h-2V7h2v8z"/>
+        </svg>
+        <h2>Abertura de Caixa</h2>
+        <p class="text-secondary">Informe o valor do suprimento inicial</p>
+      </div>
+      <div class="input-group">
+        <label for="abertura-valor">Valor do Suprimento (R$)</label>
+        <input type="text" id="abertura-valor" class="input-currency" placeholder="0,00" autofocus>
+      </div>
+      <div class="abertura-actions">
+        <button class="btn btn-primary btn-lg" id="btn-abrir-caixa">Abrir Caixa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TELA PRINCIPAL DO PDV ===== -->
+  <div id="view-pos" class="view">
+    <!-- Header -->
+    <header class="pos-header">
+      <div class="pos-header-left">
+        <span class="pos-logo">ApoloWeb</span>
+        <span class="pos-separator">|</span>
+        <span class="pos-info" id="pos-caixa">Caixa: ---</span>
+      </div>
+      <div class="pos-header-center">
+        <span id="pos-status-badge" class="status-badge status-online">ONLINE</span>
+        <span id="pos-cupom-info" class="pos-info"></span>
+        <span id="pos-cliente-info" class="pos-info pos-cliente-badge hidden"></span>
+      </div>
+      <div class="pos-header-right">
+        <span class="pos-info" id="pos-operador">Operador: ---</span>
+        <span class="pos-separator">|</span>
+        <span class="pos-clock" id="pos-clock">00:00</span>
+      </div>
+    </header>
+
+    <!-- Corpo principal -->
+    <main class="pos-main">
+      <!-- Grid de itens -->
+      <section class="pos-items-panel">
+        <div class="panel-header">
+          <h3>Itens do Cupom</h3>
+          <span id="pos-qtd-itens" class="badge">0 itens</span>
+        </div>
+        <div class="items-grid-container">
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th class="col-seq">#</th>
+                <th class="col-cod">Codigo</th>
+                <th class="col-desc">Descricao</th>
+                <th class="col-qtd">Qtde</th>
+                <th class="col-unit">Vl.Unit</th>
+                <th class="col-total">Total</th>
+              </tr>
+            </thead>
+            <tbody id="items-tbody">
+              <!-- Itens inseridos dinamicamente -->
+            </tbody>
+          </table>
+        </div>
+        <!-- Ultimo item adicionado (destaque) -->
+        <div id="last-item-highlight" class="last-item hidden">
+          <span id="last-item-desc"></span>
+          <span id="last-item-val"></span>
+        </div>
+      </section>
+
+      <!-- Painel lateral - Resumo + Input -->
+      <aside class="pos-sidebar">
+        <!-- Resumo -->
+        <div class="summary-card">
+          <div class="summary-row">
+            <span>Subtotal</span>
+            <span id="pos-subtotal" class="summary-value">0,00</span>
+          </div>
+          <div class="summary-row summary-discount">
+            <span>Desconto</span>
+            <span id="pos-desconto" class="summary-value">0,00</span>
+          </div>
+          <div class="summary-row summary-surcharge">
+            <span>Acrescimo</span>
+            <span id="pos-acrescimo" class="summary-value">0,00</span>
+          </div>
+          <div class="summary-divider"></div>
+          <div class="summary-row summary-total">
+            <span>TOTAL</span>
+            <span id="pos-total" class="summary-value-lg">R$ 0,00</span>
+          </div>
+        </div>
+
+        <!-- Input de codigo de barras -->
+        <div class="barcode-input-card">
+          <label for="barcode-input">Codigo de Barras / Produto <small style="color:var(--text-secondary); font-weight:400;">(Qtd * Codigo)</small></label>
+          <div class="barcode-input-wrapper">
+            <input type="text" id="barcode-input" placeholder="Leia ou digite o codigo" autofocus>
+            <button class="btn btn-icon" id="btn-search-product" title="Buscar produto (F1)">
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="currentColor" d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+            </button>
+          </div>
+          <!-- Indicador de quantidade pendente -->
+          <div class="quick-qty" id="quick-qty-panel" style="display:none;">
+            <label>Qtd:</label>
+            <span id="quick-qty-display" class="quick-qty-value">1</span>
+          </div>
+        </div>
+
+        <!-- Info pagamento (visivel quando em pagamento) -->
+        <div id="payment-summary" class="payment-summary-card hidden">
+          <div class="summary-row">
+            <span>Total Pago</span>
+            <span id="pos-total-pago" class="summary-value text-success">0,00</span>
+          </div>
+          <div class="summary-row">
+            <span>Restante</span>
+            <span id="pos-restante" class="summary-value text-warning">0,00</span>
+          </div>
+          <div class="summary-row">
+            <span>Troco</span>
+            <span id="pos-troco" class="summary-value-lg text-success">R$ 0,00</span>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Barra de funcoes F1-F12 -->
+    <footer class="pos-footer">
+      <div class="function-keys">
+        <button class="fkey" data-key="F1"><span class="fkey-label">F1</span><span class="fkey-text">Produto</span></button>
+        <button class="fkey" data-key="F2"><span class="fkey-label">F2</span><span class="fkey-text">Cliente</span></button>
+        <button class="fkey" data-key="F3"><span class="fkey-label">F3</span><span class="fkey-text">Desconto</span></button>
+        <button class="fkey" data-key="F4"><span class="fkey-label">F4</span><span class="fkey-text">Pagamento</span></button>
+        <button class="fkey" data-key="F6"><span class="fkey-label">F6</span><span class="fkey-text">Cancelar Item</span></button>
+        <button class="fkey" data-key="F7"><span class="fkey-label">F7</span><span class="fkey-text">Pre-Venda</span></button>
+        <button class="fkey" data-key="F8"><span class="fkey-label">F8</span><span class="fkey-text">Sangria</span></button>
+        <button class="fkey" data-key="F9"><span class="fkey-label">F9</span><span class="fkey-text">Suprimento</span></button>
+        <button class="fkey" data-key="F10"><span class="fkey-label">F10</span><span class="fkey-text">NFCe</span></button>
+        <button class="fkey" data-key="F11"><span class="fkey-label">F11</span><span class="fkey-text">Fechar Cx</span></button>
+        <button class="fkey fkey-danger" data-key="F12"><span class="fkey-label">F12</span><span class="fkey-text">Cancelar Venda</span></button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ===== MODAL PAGAMENTO ===== -->
+  <div id="modal-pagamento" class="modal hidden">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h2>Pagamento</h2>
+        <button class="btn-close" data-close-modal="modal-pagamento">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Tabs de pagamento -->
+        <div class="pay-tabs">
+          <button class="pay-tab active" data-tab="pay-dinheiro">F1 Dinheiro</button>
+          <button class="pay-tab" data-tab="pay-cheque">F2 Cheque</button>
+          <button class="pay-tab" data-tab="pay-cartao">F3 Cartao</button>
+          <button class="pay-tab" data-tab="pay-pix">F4 PIX</button>
+          <button class="pay-tab" data-tab="pay-cobranca">F5 Cobranca</button>
+          <button class="pay-tab" data-tab="pay-pos">F6 POS</button>
+        </div>
+
+        <!-- Conteudo das tabs -->
+        <div class="pay-tab-content">
+          <!-- Dinheiro -->
+          <div id="pay-dinheiro" class="pay-panel active">
+            <div class="input-group">
+              <label>Valor em Dinheiro (R$)</label>
+              <input type="text" id="pay-dinheiro-valor" class="input-currency input-lg" placeholder="0,00">
+            </div>
+          </div>
+
+          <!-- Cheque -->
+          <div id="pay-cheque" class="pay-panel">
+            <div class="pay-grid-2col">
+              <div class="input-group"><label>Valor (R$)</label><input type="text" id="pay-cheque-valor" class="input-currency"></div>
+              <div class="input-group"><label>Banco</label><input type="text" id="pay-cheque-banco"></div>
+              <div class="input-group"><label>Agencia</label><input type="text" id="pay-cheque-agencia"></div>
+              <div class="input-group"><label>Conta</label><input type="text" id="pay-cheque-conta"></div>
+              <div class="input-group"><label>Num. Cheque</label><input type="text" id="pay-cheque-num"></div>
+              <div class="input-group"><label>CPF/CNPJ</label><input type="text" id="pay-cheque-cpf"></div>
+              <div class="input-group"><label>CMC7</label><input type="text" id="pay-cheque-cmc7"></div>
+              <div class="input-group"><label>Dt. Pre-datado</label><input type="date" id="pay-cheque-dt"></div>
+            </div>
+          </div>
+
+          <!-- Cartao -->
+          <div id="pay-cartao" class="pay-panel">
+            <div class="pay-grid-2col">
+              <div class="input-group"><label>Valor (R$)</label><input type="text" id="pay-cartao-valor" class="input-currency"></div>
+              <div class="input-group">
+                <label>Tipo</label>
+                <select id="pay-cartao-tipo">
+                  <option value="credito">Credito</option>
+                  <option value="debito">Debito</option>
+                </select>
+              </div>
+              <div class="input-group"><label>Bandeira</label><select id="pay-cartao-bandeira"></select></div>
+              <div class="input-group"><label>Parcelas</label><input type="number" id="pay-cartao-parcelas" value="1" min="1"></div>
+              <div class="input-group"><label>NSU</label><input type="text" id="pay-cartao-nsu"></div>
+              <div class="input-group"><label>Autorizacao</label><input type="text" id="pay-cartao-aut"></div>
+            </div>
+          </div>
+
+          <!-- PIX -->
+          <div id="pay-pix" class="pay-panel">
+            <div class="input-group">
+              <label>Valor PIX (R$)</label>
+              <input type="text" id="pay-pix-valor" class="input-currency input-lg" placeholder="0,00">
+            </div>
+            <div class="input-group">
+              <label>ID Transacao</label>
+              <input type="text" id="pay-pix-id">
+            </div>
+          </div>
+
+          <!-- Cobranca -->
+          <div id="pay-cobranca" class="pay-panel">
+            <div class="pay-grid-2col">
+              <div class="input-group"><label>Valor (R$)</label><input type="text" id="pay-cobranca-valor" class="input-currency"></div>
+              <div class="input-group"><label>Plano Pagto</label><select id="pay-cobranca-plano"></select></div>
+              <div class="input-group"><label>Vencimento</label><input type="date" id="pay-cobranca-venc"></div>
+            </div>
+          </div>
+
+          <!-- POS -->
+          <div id="pay-pos" class="pay-panel">
+            <div class="pay-grid-2col">
+              <div class="input-group"><label>Valor (R$)</label><input type="text" id="pay-pos-valor" class="input-currency"></div>
+              <div class="input-group"><label>Tipo</label>
+                <select id="pay-pos-tipo"><option value="credito">Credito</option><option value="debito">Debito</option></select>
+              </div>
+              <div class="input-group"><label>Bandeira</label><select id="pay-pos-bandeira"></select></div>
+              <div class="input-group"><label>NSU</label><input type="text" id="pay-pos-nsu"></div>
+              <div class="input-group"><label>Autorizacao</label><input type="text" id="pay-pos-aut"></div>
+              <div class="input-group"><label>Parcelas</label><input type="number" id="pay-pos-parcelas" value="1" min="1"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Resumo pagamento -->
+        <div class="pay-resume">
+          <div class="pay-resume-row"><span>Total da Venda</span><span id="pay-total" class="pay-val">R$ 0,00</span></div>
+          <div class="pay-resume-row"><span>Total Pago</span><span id="pay-pago" class="pay-val text-success">R$ 0,00</span></div>
+          <div class="pay-resume-row pay-resume-highlight"><span>Restante</span><span id="pay-restante" class="pay-val">R$ 0,00</span></div>
+          <!-- Lista de pagamentos feitos -->
+          <div id="pay-list" class="pay-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-pay-cancel">ESC Voltar</button>
+        <button class="btn btn-primary" id="btn-pay-add">F8 Registrar</button>
+        <button class="btn btn-success" id="btn-pay-finish">F5 Finalizar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL BUSCA PRODUTO ===== -->
+  <div id="modal-produtos" class="modal hidden">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h2>Buscar Produto</h2>
+        <button class="btn-close" data-close-modal="modal-produtos">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="search-bar">
+          <input type="text" id="search-produto" placeholder="Digite o nome, codigo ou barras do produto" autofocus>
+        </div>
+        <div class="search-grid-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Cod.Barra</th>
+                <th>Descricao</th>
+                <th>Unidade</th>
+                <th>Embalagem</th>
+                <th>Preco</th>
+                <th>Preco Atac.</th>
+                <th>Oferta</th>
+                <th>Disponivel</th>
+              </tr>
+            </thead>
+            <tbody id="search-produto-tbody"></tbody>
+          </table>
+        </div>
+        <p class="search-hint">Tecle ENTER para selecionar | ESC para voltar</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL IDENTIFICACAO CLIENTE/CONSUMIDOR ===== -->
+  <div id="modal-clientes" class="modal hidden">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h2>Identificacao do Consumidor</h2>
+        <button class="btn-close" data-close-modal="modal-clientes">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Secao de identificacao por CPF/CNPJ -->
+        <div class="consumer-id-section">
+          <label for="input-cpfcnpj">CPF / CNPJ do Consumidor</label>
+          <div class="consumer-id-row">
+            <input type="text" id="input-cpfcnpj" placeholder="Digite o CPF ou CNPJ" maxlength="18" autofocus>
+            <button class="btn btn-primary" id="btn-identificar-consumidor">Identificar</button>
+          </div>
+          <div id="consumer-id-result" class="consumer-id-result hidden">
+            <span id="consumer-id-icon" class="consumer-id-icon"></span>
+            <div class="consumer-id-info">
+              <strong id="consumer-id-nome"></strong>
+              <span id="consumer-id-detalhe"></span>
+            </div>
+          </div>
+        </div>
+        <div class="consumer-divider">
+          <span>ou buscar cliente cadastrado</span>
+        </div>
+        <!-- Secao de busca por nome/codigo -->
+        <div class="search-bar">
+          <input type="text" id="search-cliente" placeholder="Nome, CPF/CNPJ ou codigo do cliente">
+        </div>
+        <div class="search-grid-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>CPF/CNPJ</th>
+                <th>Nome</th>
+                <th>Cidade</th>
+                <th>UF</th>
+                <th>Credito</th>
+              </tr>
+            </thead>
+            <tbody id="search-cliente-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL GENERICO (dialogo/input) ===== -->
+  <div id="modal-dialog" class="modal hidden">
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h2 id="dialog-title">Informacao</h2>
+      </div>
+      <div class="modal-body">
+        <p id="dialog-message"></p>
+        <div id="dialog-input-group" class="input-group hidden">
+          <label id="dialog-input-label"></label>
+          <input type="text" id="dialog-input" class="input-currency">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="dialog-btn-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="dialog-btn-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL NFCe ===== -->
+  <div id="modal-nfce" class="modal hidden">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h2>Documentos Fiscais - NFCe</h2>
+        <button class="btn-close" data-close-modal="modal-nfce">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="nfce-tabs">
+          <button class="pay-tab active" data-tab="nfce-pendentes">Pendentes</button>
+          <button class="pay-tab" data-tab="nfce-contingencia">Contingencia</button>
+        </div>
+        <div id="nfce-pendentes" class="pay-panel active">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Chave</th>
+                <th>Num.Nota</th>
+                <th>Cupom</th>
+                <th>Valor</th>
+                <th>Status</th>
+                <th>Tentativas</th>
+                <th>Erro</th>
+              </tr>
+            </thead>
+            <tbody id="nfce-pendentes-tbody"></tbody>
+          </table>
+        </div>
+        <div id="nfce-contingencia" class="pay-panel">
+          <div class="contingencia-info">
+            <div class="contingencia-status" id="contingencia-status-info">
+              <span class="status-badge status-online" id="contingencia-badge">ONLINE</span>
+            </div>
+            <div class="input-group">
+              <label>Tipo de Contingencia</label>
+              <select id="contingencia-tipo">
+                <option value="OFFLINE">Offline (SEFAZ indisponivel)</option>
+                <option value="SVC_AN">SVC-AN (Ambiente Nacional)</option>
+                <option value="SVC_RS">SVC-RS (Rio Grande do Sul)</option>
+                <option value="SVC_SP">SVC-SP (Sao Paulo)</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>Justificativa</label>
+              <textarea id="contingencia-justificativa" rows="3" placeholder="Motivo para entrar em contingencia"></textarea>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-warning" id="btn-entrar-contingencia">Entrar em Contingencia</button>
+              <button class="btn btn-success" id="btn-sair-contingencia">Sair da Contingencia</button>
+              <button class="btn btn-primary" id="btn-retransmitir">Retransmitir Pendentes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL FECHAMENTO ===== -->
+  <div id="modal-fechamento" class="modal hidden">
+    <div class="modal-content modal-md">
+      <div class="modal-header">
+        <h2>Fechamento de Caixa</h2>
+      </div>
+      <div class="modal-body">
+        <div class="fechamento-resumo">
+          <div class="fechamento-row"><span>Qtd. Vendas</span><span id="fech-qtd-vendas">0</span></div>
+          <div class="fechamento-row"><span>Total Vendas</span><span id="fech-total-vendas">R$ 0,00</span></div>
+          <div class="fechamento-row"><span>Total Sangrias</span><span id="fech-total-sangrias">R$ 0,00</span></div>
+          <div class="fechamento-row"><span>Total Suprimentos</span><span id="fech-total-suprimentos">R$ 0,00</span></div>
+          <div class="fechamento-divider"></div>
+          <div class="fechamento-row fechamento-total"><span>Saldo em Caixa</span><span id="fech-saldo">R$ 0,00</span></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-fech-cancel">Cancelar</button>
+        <button class="btn btn-danger" id="btn-fech-confirm">Confirmar Fechamento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== OVERLAY SINCRONIZACAO ===== -->
+  <div id="sync-overlay" class="sync-overlay hidden">
+    <div class="sync-content">
+      <div class="sync-spinner"></div>
+      <p class="sync-text" id="sync-text">Sincronizando dados...</p>
+      <p class="sync-subtext" id="sync-subtext">Aguarde enquanto os dados sao atualizados</p>
+      <div class="sync-progress-bar">
+        <div class="sync-progress-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOAST NOTIFICATIONS ===== -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="js/utils.js"></script>
+  <script src="js/bridge.js"></script>
+  <script src="js/keyboard.js"></script>
+  <script src="js/pos.js"></script>
+  <script src="js/products.js"></script>
+  <script src="js/customers.js"></script>
+  <script src="js/payment.js"></script>
+  <script src="js/nfce.js"></script>
+  <script src="js/reports.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

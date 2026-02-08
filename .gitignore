@@ -1,0 +1,14 @@
+# Delphi compiled/cache
+*.dcu
+*.exe
+*.dll
+*.res
+*.identcache
+*.dproj.local
+*.skincfg
+__history/
+__recovery/
+WebView2Cache/
+
+# IDE
+*.~*
