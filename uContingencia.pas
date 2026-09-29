@@ -34,9 +34,19 @@ type
     function ListarPendentes: TJSONArray;
     function QtdePendentes: Integer;
 
+    // Descarte manual: tira da fila os documentos REJEITADOS escolhidos pelo
+    // operador. Nao envia nada a SEFAZ - documento rejeitado nunca chegou a
+    // ser autorizado, entao nao existe cancelamento a fazer. So PENDENTE fica
+    // de fora: esse ainda tem envio a fazer e sumir com ele perderia a venda.
+    function DescartarDocs(const AIds: TArray<Integer>; AMatricula: Integer): Integer;
+
     // Retransmissao
     function ObterProximoDocParaEnvio: Integer;
     procedure IncrementarTentativa(ADocId: Integer; const AErro: string);
+    // Zera o contador de tentativas dos PENDENTES. ObterProximoDocParaEnvio
+    // ignora quem passou de MAX_TENTATIVAS_CONTINGENCIA; sem este reset uma
+    // retransmissao manual nao alcancava os documentos ja esgotados.
+    procedure ReiniciarTentativas;
 
     // Helpers
     function TipoContingenciaParaACBr: Integer;
@@ -52,13 +62,41 @@ implementation
 { TContingenciaManager }
 
 constructor TContingenciaManager.Create(ASQLite: TSQLiteDB);
+var
+  LDtInicio: string;
+  LFmt: TFormatSettings;
 begin
   inherited Create;
   FSQLite := ASQLite;
-  FTipoAtual := tcNenhuma;
-  FJustificativa := '';
-  FDtInicio := 0;
   FTentativasConexao := 0;
+
+  // Restaurar o estado gravado: sem isso o app reabria sempre em modo normal
+  // enquanto o SQLite continuava marcado como OFFLINE, e os dois estados
+  // (memoria x banco) divergiam a cada reinicio
+  FTipoAtual := TTipoContingencia.FromString(
+    FSQLite.ObterEstado('CONTINGENCIA_TIPO', 'NORMAL'));
+  FJustificativa := FSQLite.ObterEstado('CONTINGENCIA_JUSTIFICATIVA', '');
+
+  FDtInicio := 0;
+  LDtInicio := FSQLite.ObterEstado('CONTINGENCIA_DT_INICIO', '');
+  if LDtInicio <> '' then
+  begin
+    // Gravado como 'yyyy-mm-dd hh:nn:ss'
+    LFmt := TFormatSettings.Invariant;
+    LFmt.DateSeparator := '-';
+    LFmt.TimeSeparator := ':';
+    LFmt.ShortDateFormat := 'yyyy-mm-dd';
+    LFmt.ShortTimeFormat := 'hh:nn:ss';
+    if not TryStrToDateTime(LDtInicio, FDtInicio, LFmt) then
+      FDtInicio := 0;
+  end;
+
+  if FTipoAtual = tcNenhuma then Exit;
+
+  // Se nao sobrou nenhum pendente, a contingencia ficou presa de um ciclo
+  // anterior - voltar ao normal para nao emitir offline sem necessidade
+  if QtdePendentes = 0 then
+    SairContingencia;
 end;
 
 procedure TContingenciaManager.EntrarContingencia(ATipo: TTipoContingencia;
@@ -141,6 +179,7 @@ begin
     scAutorizado: LStatusStr := 'AUTORIZADO';
     scRejeitado:  LStatusStr := 'REJEITADO';
     scCancelado:  LStatusStr := 'CANCELADO';
+    scDescartado: LStatusStr := 'DESCARTADO';
   end;
 
   FSQLite.ExecutarSQL(
@@ -158,6 +197,12 @@ begin
       '(SELECT cupom_id FROM nfce_contingencia WHERE id = :p1)',
       [AProtocolo, ADocId]
     );
+
+    // Zerou a fila: sair da contingencia sozinho. Sem isso o operador ficava
+    // preso - "sair" exigia zero pendentes e as vendas novas continuavam
+    // entrando como pendentes
+    if EstaEmContingencia and (QtdePendentes = 0) then
+      SairContingencia;
   end;
 end;
 
@@ -199,14 +244,66 @@ begin
   end;
 end;
 
+// Conta apenas o que ainda tem envio a fazer. REJEITADO fica de fora de
+// proposito: o SEFAZ ja respondeu negando, reenviar o mesmo XML repete a
+// rejeicao, e contar esses documentos deixava o caixa preso em contingencia
+// para sempre (nao dava para sair nem retransmitir).
 function TContingenciaManager.QtdePendentes: Integer;
 var
   LVal: Variant;
 begin
   LVal := FSQLite.ExecutarScalar(
-    'SELECT COUNT(*) FROM nfce_contingencia WHERE status IN (''PENDENTE'', ''REJEITADO'')'
+    'SELECT COUNT(*) FROM nfce_contingencia WHERE status = ''PENDENTE'''
   );
   Result := VarToIntDef(LVal, 0);
+end;
+
+{ Descarte manual dos rejeitados. Trabalha so' com status REJEITADO: o SEFAZ ja
+  respondeu negando, entao nao ha envio pendente nem autorizacao a cancelar -
+  o documento apenas para de aparecer na fila. O filtro na propria UPDATE (e
+  nao so' na tela) evita que um id de PENDENTE mandado pelo front derrube uma
+  nota que ainda tem envio a fazer. }
+function TContingenciaManager.DescartarDocs(const AIds: TArray<Integer>;
+  AMatricula: Integer): Integer;
+var
+  LLista: string;
+  I: Integer;
+  LVal: Variant;
+begin
+  Result := 0;
+  if Length(AIds) = 0 then
+    Exit;
+
+  // Os ids vem do JS: remontar a lista com IntToStr garante que so' inteiro
+  // entra no SQL, sem depender de o front ter mandado numero mesmo
+  LLista := '';
+  for I := 0 to High(AIds) do
+  begin
+    if AIds[I] <= 0 then
+      Continue;
+    if LLista <> '' then
+      LLista := LLista + ',';
+    LLista := LLista + IntToStr(AIds[I]);
+  end;
+
+  if LLista = '' then
+    Exit;
+
+  LVal := FSQLite.ExecutarScalar(
+    'SELECT COUNT(*) FROM nfce_contingencia ' +
+    'WHERE id IN (' + LLista + ') AND status = ''REJEITADO'''
+  );
+  Result := VarToIntDef(LVal, 0);
+  if Result = 0 then
+    Exit;
+
+  FSQLite.ExecutarSQL(
+    'UPDATE nfce_contingencia ' +
+    'SET status = ''DESCARTADO'', ' +
+    '    dt_descarte = datetime(''now'',''localtime''), ' +
+    '    descartado_por = ' + IntToStr(AMatricula) + ' ' +
+    'WHERE id IN (' + LLista + ') AND status = ''REJEITADO'''
+  );
 end;
 
 function TContingenciaManager.ObterProximoDocParaEnvio: Integer;
@@ -223,6 +320,13 @@ begin
     Result := 0
   else
     Result := LVal;
+end;
+
+procedure TContingenciaManager.ReiniciarTentativas;
+begin
+  FSQLite.ExecutarSQL(
+    'UPDATE nfce_contingencia SET tentativas = 0 WHERE status = ''PENDENTE'''
+  );
 end;
 
 procedure TContingenciaManager.IncrementarTentativa(ADocId: Integer; const AErro: string);

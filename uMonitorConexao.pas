@@ -1,15 +1,37 @@
 unit uMonitorConexao;
 
+{ Monitor de conexao do caixa.
+
+  Decide quando entrar em contingencia OFFLINE e quando o caixa pode voltar a
+  emitir online. NAO sabe testar nada sozinho: o teste vem de fora, pelo
+  OnTestarConexao (o form usa o StatusServico do SEFAZ e, como alternativa, a
+  conexao com o Oracle). Aqui mora so' a politica.
+
+  Historico do que deu errado antes (08/09/2026, caixa 33 - 96% das vendas do
+  dia emitidas offline sem uma unica queda real):
+
+  1. O teste era um HEAD na pagina de disponibilidade do portal nacional e uma
+     URL de Broker lida do registro (que nao existia, entao dava False sempre).
+     Nenhum dos dois diz se o webservice de NFCe da UF esta no ar.
+  2. FFalhasConsecutivas so' zerava quando um teste passava, e a entrada em
+     contingencia era reavaliada a cada tick. Depois de 3 falhas o caixa
+     reentrava em contingencia todo minuto - inclusive logo depois de sair.
+     As 11:43 a fila zerou e ele saiu; as 11:45 uma venda saiu normal e foi
+     autorizada na hora; as 11:48 ja estava offline de novo.
+  3. A volta so' era notificada na transicao offline->online do proprio
+     monitor. A contingencia aberta pela falha de envio da NFCe nao passa por
+     aqui, entao nao havia transicao para notificar e ninguem retransmitia:
+     as notas do dia 05 so' subiram no dia 08, ~71h depois. }
+
 interface
 
 uses
   System.SysUtils, System.Classes, Vcl.ExtCtrls,
-  Winapi.Windows, System.Win.Registry,
-  System.Net.URLClient, System.Net.HttpClient, System.Net.HttpClientComponent,
   uSQLiteDB, uTypesApoloWeb, uConstantesWeb, uContingencia;
 
 type
   TOnStatusConexaoChanged = procedure(AOnline: Boolean; ATipo: TTipoContingencia) of object;
+  TTesteConexao = function: Boolean of object;
 
   TMonitorConexao = class
   private
@@ -17,16 +39,13 @@ type
     FSQLite: TSQLiteDB;
     FContingencia: TContingenciaManager;
     FOnStatusChanged: TOnStatusConexaoChanged;
+    FOnTestarConexao: TTesteConexao;
     FFalhasConsecutivas: Integer;
     FUltimaVerificacao: TDateTime;
     FOnline: Boolean;
-    FURL_SEFAZ: string;
-    FURL_Broker: string;
 
     procedure OnTimer(Sender: TObject);
-    function TestarConexaoSEFAZ: Boolean;
-    function TestarConexaoBroker: Boolean;
-    procedure CarregarURLs;
+    function ConexaoDisponivel: Boolean;
   public
     constructor Create(ASQLite: TSQLiteDB; AContingencia: TContingenciaManager);
     destructor Destroy; override;
@@ -37,12 +56,13 @@ type
 
     property Online: Boolean read FOnline;
     property OnStatusChanged: TOnStatusConexaoChanged read FOnStatusChanged write FOnStatusChanged;
+    // Teste de conectividade. Sem ele o monitor considera o caixa online e
+    // nunca entra em contingencia sozinho - o que e' melhor que entrar por
+    // engano, porque a falha real de envio da NFCe ja cobre esse caso.
+    property OnTestarConexao: TTesteConexao read FOnTestarConexao write FOnTestarConexao;
   end;
 
 implementation
-
-uses
-  System.DateUtils;
 
 { TMonitorConexao }
 
@@ -55,8 +75,6 @@ begin
   FFalhasConsecutivas := 0;
   FOnline := True;
   FUltimaVerificacao := 0;
-
-  CarregarURLs;
 
   FTimer := TTimer.Create(nil);
   FTimer.Interval := INTERVALO_MONITOR_CONEXAO;
@@ -71,30 +89,6 @@ begin
   inherited;
 end;
 
-procedure TMonitorConexao.CarregarURLs;
-var
-  LReg: TRegistry;
-begin
-  LReg := TRegistry.Create;
-  try
-    LReg.RootKey := HKEY_CURRENT_USER;
-
-    // URL do Broker
-    if LReg.OpenKey(REG_SEC_BROKER, False) then
-    begin
-      if LReg.ValueExists('URL') then
-        FURL_Broker := LReg.ReadString('URL');
-      LReg.CloseKey;
-    end;
-
-    // SEFAZ - usar URL conhecida baseada no estado (UF agora vem do SQLite)
-    if FSQLite.ObterEstado('UF_WEBSERVICE', '') <> '' then
-      FURL_SEFAZ := 'https://www.nfe.fazenda.gov.br/portal/disponibilidade.aspx';
-  finally
-    LReg.Free;
-  end;
-end;
-
 procedure TMonitorConexao.Iniciar;
 begin
   FTimer.Enabled := True;
@@ -105,45 +99,59 @@ begin
   FTimer.Enabled := False;
 end;
 
+function TMonitorConexao.ConexaoDisponivel: Boolean;
+begin
+  if not Assigned(FOnTestarConexao) then
+    Exit(True);
+  try
+    Result := FOnTestarConexao;
+  except
+    Result := False;
+  end;
+end;
+
 function TMonitorConexao.VerificarAgora: Boolean;
 var
-  LConectouBroker, LConectouSEFAZ: Boolean;
   LAnterior: Boolean;
 begin
   LAnterior := FOnline;
   FUltimaVerificacao := Now;
 
-  // Testar conexao com broker/servidor
-  LConectouBroker := TestarConexaoBroker;
-  LConectouSEFAZ := TestarConexaoSEFAZ;
-
-  if LConectouBroker or LConectouSEFAZ then
+  if ConexaoDisponivel then
   begin
     FFalhasConsecutivas := 0;
     FOnline := True;
 
-    // Se estava em contingencia automatica e voltou, notificar
-    if not LAnterior and FOnline then
-    begin
-      if Assigned(FOnStatusChanged) then
-        FOnStatusChanged(True, tcNenhuma);
-    end;
+    // Notificar a volta quando o monitor estava offline OU quando o caixa
+    // esta em contingencia com o monitor se achando online - e' o caso da
+    // contingencia aberta pela falha de envio da NFCe, que nunca gerou
+    // transicao e por isso deixava as notas paradas por horas.
+    if Assigned(FOnStatusChanged) and
+       ((not LAnterior) or FContingencia.EstaEmContingencia) then
+      FOnStatusChanged(True, tcNenhuma);
+  end
+  else if FContingencia.EstaEmContingencia then
+  begin
+    // Ja esta offline: nao acumular falhas. Sem isso o contador continuava
+    // subindo durante toda a contingencia e, no instante em que a fila
+    // zerava e o caixa saia, o proximo tick ja o jogava de volta.
+    FFalhasConsecutivas := 0;
+    FOnline := False;
+    if LAnterior and Assigned(FOnStatusChanged) then
+      FOnStatusChanged(False, FContingencia.TipoAtual);
   end
   else
   begin
     Inc(FFalhasConsecutivas);
 
-    // Entrar em contingencia apos MAX_TENTATIVAS_CONTINGENCIA falhas
     if FFalhasConsecutivas >= MAX_TENTATIVAS_CONTINGENCIA then
     begin
       FOnline := False;
-
-      if not FContingencia.EstaEmContingencia then
-      begin
-        FContingencia.EntrarContingencia(tcOffLine,
-          'Perda de conexao detectada automaticamente apos ' +
-          IntToStr(FFalhasConsecutivas) + ' tentativas');
-      end;
+      FContingencia.EntrarContingencia(tcOffLine,
+        'Perda de conexao detectada automaticamente apos ' +
+        IntToStr(FFalhasConsecutivas) + ' tentativas');
+      // Sair da contingencia exige 3 falhas NOVAS para reentrar
+      FFalhasConsecutivas := 0;
 
       if Assigned(FOnStatusChanged) then
         FOnStatusChanged(False, FContingencia.TipoAtual);
@@ -156,52 +164,6 @@ end;
 procedure TMonitorConexao.OnTimer(Sender: TObject);
 begin
   VerificarAgora;
-end;
-
-function TMonitorConexao.TestarConexaoSEFAZ: Boolean;
-var
-  LHTTP: TNetHTTPClient;
-  LResp: IHTTPResponse;
-begin
-  Result := False;
-  if FURL_SEFAZ = '' then Exit;
-
-  LHTTP := TNetHTTPClient.Create(nil);
-  try
-    LHTTP.ConnectionTimeout := 5000;
-    LHTTP.ResponseTimeout := 5000;
-    try
-      LResp := LHTTP.Head(FURL_SEFAZ);
-      Result := (LResp.StatusCode >= 200) and (LResp.StatusCode < 500);
-    except
-      Result := False;
-    end;
-  finally
-    LHTTP.Free;
-  end;
-end;
-
-function TMonitorConexao.TestarConexaoBroker: Boolean;
-var
-  LHTTP: TNetHTTPClient;
-  LResp: IHTTPResponse;
-begin
-  Result := False;
-  if FURL_Broker = '' then Exit;
-
-  LHTTP := TNetHTTPClient.Create(nil);
-  try
-    LHTTP.ConnectionTimeout := 5000;
-    LHTTP.ResponseTimeout := 5000;
-    try
-      LResp := LHTTP.Head(FURL_Broker);
-      Result := (LResp.StatusCode >= 200) and (LResp.StatusCode < 500);
-    except
-      Result := False;
-    end;
-  finally
-    LHTTP.Free;
-  end;
 end;
 
 end.

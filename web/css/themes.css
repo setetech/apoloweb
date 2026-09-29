@@ -1,0 +1,316 @@
+/* ========================================================
+   ApoloWeb - Temas (skins) do PDV
+   O tema escuro e o default definido em main.css (:root).
+   Cada tema abaixo sobrescreve as variaveis via [data-theme].
+   ======================================================== */
+
+/* ===== ESCURO (explicito) =====
+   Duplica o :root do main.css. Necessario para o card de preview do tema
+   escuro renderizar certo mesmo quando outro tema esta ativo no <html>
+   (as variaveis herdam do ancestral; o data-theme do card re-ancora). */
+[data-theme="escuro"] {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-tertiary: #252836;
+  --bg-hover: #2d3142;
+  --bg-active: #353a50;
+
+  --accent-primary: #6c5ce7;
+  --accent-primary-hover: #7c6ff7;
+  --accent-success: #00b894;
+  --accent-success-hover: #00d4a8;
+  --accent-warning: #fdcb6e;
+  --accent-warning-hover: #fdd88a;
+  --accent-danger: #e17055;
+  --accent-danger-hover: #e88672;
+  --accent-info: #74b9ff;
+
+  --text-primary: #f8f9fa;
+  --text-secondary: #a0a4b8;
+  --text-muted: #6c7293;
+  --text-inverse: #0f1117;
+
+  --border-color: #2d3142;
+  --border-focus: #6c5ce7;
+}
+
+/* ===== CLARO ===== */
+[data-theme="claro"] {
+  --bg-primary: #f2f4f8;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e9ecf2;
+  --bg-hover: #dde2ea;
+  --bg-active: #cfd6e2;
+
+  --accent-primary: #5b4bd5;
+  --accent-primary-hover: #4a3ac4;
+  --accent-success: #00966f;
+  --accent-success-hover: #007a5a;
+  --accent-warning: #e0a800;
+  --accent-warning-hover: #c69500;
+  --accent-danger: #d9534f;
+  --accent-danger-hover: #c9302c;
+  --accent-info: #2f80d9;
+
+  --text-primary: #1d2330;
+  --text-secondary: #55607a;
+  --text-muted: #8a93a8;
+  --text-inverse: #ffffff;
+
+  --border-color: #d4dae4;
+  --border-focus: #5b4bd5;
+
+  --shadow-sm: 0 2px 4px rgba(29,35,48,0.10);
+  --shadow-md: 0 4px 12px rgba(29,35,48,0.14);
+  --shadow-lg: 0 8px 24px rgba(29,35,48,0.18);
+}
+
+/* ===== FLORESTA (verde escuro) ===== */
+[data-theme="floresta"] {
+  --bg-primary: #0d1512;
+  --bg-secondary: #14201b;
+  --bg-tertiary: #1c2c25;
+  --bg-hover: #24382f;
+  --bg-active: #2d453a;
+
+  --accent-primary: #3e9b63;
+  --accent-primary-hover: #4fb377;
+  --accent-success: #7bc96f;
+  --accent-success-hover: #8fd984;
+  --accent-warning: #e3b341;
+  --accent-warning-hover: #edc25c;
+  --accent-danger: #d9634f;
+  --accent-danger-hover: #e57a67;
+  --accent-info: #56b6a9;
+
+  --text-primary: #eef5f0;
+  --text-secondary: #9db8a8;
+  --text-muted: #6a8577;
+  --text-inverse: #0d1512;
+
+  --border-color: #2a3f34;
+  --border-focus: #3e9b63;
+}
+
+/* ===== FLORIDO (claro rose) ===== */
+[data-theme="florido"] {
+  --bg-primary: #fdf3f6;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f8e5ec;
+  --bg-hover: #f2d6e0;
+  --bg-active: #ebc5d3;
+
+  --accent-primary: #c2185b;
+  --accent-primary-hover: #a5124c;
+  --accent-success: #2e8b57;
+  --accent-success-hover: #247347;
+  --accent-warning: #d98e04;
+  --accent-warning-hover: #bd7c03;
+  --accent-danger: #c62828;
+  --accent-danger-hover: #a92222;
+  --accent-info: #7b1fa2;
+
+  --text-primary: #3a2030;
+  --text-secondary: #7a5468;
+  --text-muted: #ad8c9c;
+  --text-inverse: #ffffff;
+
+  --border-color: #eccfda;
+  --border-focus: #c2185b;
+
+  --shadow-sm: 0 2px 4px rgba(58,32,48,0.10);
+  --shadow-md: 0 4px 12px rgba(58,32,48,0.14);
+  --shadow-lg: 0 8px 24px rgba(58,32,48,0.18);
+}
+
+/* ===== OCEANO (azul escuro) ===== */
+[data-theme="oceano"] {
+  --bg-primary: #0a1420;
+  --bg-secondary: #101e30;
+  --bg-tertiary: #16293f;
+  --bg-hover: #1d344e;
+  --bg-active: #24405f;
+
+  --accent-primary: #2196c9;
+  --accent-primary-hover: #35a9db;
+  --accent-success: #26a69a;
+  --accent-success-hover: #33b5a9;
+  --accent-warning: #ffb74d;
+  --accent-warning-hover: #ffc670;
+  --accent-danger: #ef5350;
+  --accent-danger-hover: #f3706d;
+  --accent-info: #4fc3f7;
+
+  --text-primary: #eaf3fa;
+  --text-secondary: #93aec4;
+  --text-muted: #5f7a92;
+  --text-inverse: #0a1420;
+
+  --border-color: #1f3a55;
+  --border-focus: #2196c9;
+}
+
+/* ===== MEIA-NOITE (preto puro, alto contraste) ===== */
+[data-theme="meia-noite"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0b0b0d;
+  --bg-tertiary: #151519;
+  --bg-hover: #1f1f26;
+  --bg-active: #2a2a33;
+
+  --accent-primary: #4d9fff;
+  --accent-primary-hover: #66adff;
+  --accent-success: #2fdf84;
+  --accent-success-hover: #4ce598;
+  --accent-warning: #ffd60a;
+  --accent-warning-hover: #ffe14d;
+  --accent-danger: #ff5d5d;
+  --accent-danger-hover: #ff7a7a;
+  --accent-info: #64d2ff;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c7c7d1;
+  --text-muted: #86868f;
+  --text-inverse: #000000;
+
+  --border-color: #2a2a33;
+  --border-focus: #4d9fff;
+}
+
+/* ===== CAFE (marrons quentes) ===== */
+[data-theme="cafe"] {
+  --bg-primary: #1a120c;
+  --bg-secondary: #241a12;
+  --bg-tertiary: #2f2318;
+  --bg-hover: #3b2d20;
+  --bg-active: #483828;
+
+  --accent-primary: #c08c4e;
+  --accent-primary-hover: #d09e60;
+  --accent-success: #8bc34a;
+  --accent-success-hover: #9ccc65;
+  --accent-warning: #ffb300;
+  --accent-warning-hover: #ffc233;
+  --accent-danger: #e57368;
+  --accent-danger-hover: #eb897f;
+  --accent-info: #90a4ae;
+
+  --text-primary: #f3ebe3;
+  --text-secondary: #c0ab97;
+  --text-muted: #8a7360;
+  --text-inverse: #1a120c;
+
+  --border-color: #3b2d20;
+  --border-focus: #c08c4e;
+}
+
+/* ===== CEU (claro azulado) ===== */
+[data-theme="ceu"] {
+  --bg-primary: #edf4fb;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #dfeaf6;
+  --bg-hover: #cfdff0;
+  --bg-active: #bdd3ea;
+
+  --accent-primary: #1976d2;
+  --accent-primary-hover: #1565c0;
+  --accent-success: #00897b;
+  --accent-success-hover: #00776b;
+  --accent-warning: #e09b00;
+  --accent-warning-hover: #c78a00;
+  --accent-danger: #d64545;
+  --accent-danger-hover: #bf3a3a;
+  --accent-info: #0288d1;
+
+  --text-primary: #16283c;
+  --text-secondary: #4f6a83;
+  --text-muted: #7d93a8;
+  --text-inverse: #ffffff;
+
+  --border-color: #c9d9ea;
+  --border-focus: #1976d2;
+
+  --shadow-sm: 0 2px 4px rgba(22,40,60,0.10);
+  --shadow-md: 0 4px 12px rgba(22,40,60,0.14);
+  --shadow-lg: 0 8px 24px rgba(22,40,60,0.18);
+}
+
+/* ========================================================
+   Seletor de tema (modal)
+   ======================================================== */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 12px;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.theme-card:hover { border-color: var(--accent-primary); background: var(--bg-hover); }
+.theme-card.active { border-color: var(--accent-primary); box-shadow: 0 0 0 2px var(--accent-primary); }
+
+.theme-card .theme-name { font-weight: 600; }
+
+/* Miniatura da tela do PDV renderizada com as cores do PROPRIO tema:
+   o data-theme no elemento .theme-preview re-ancora as variaveis CSS,
+   entao cada pedacinho abaixo usa as cores reais daquele tema. */
+.theme-preview {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid rgba(128,128,128,0.35);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.tp-header {
+  height: 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+}
+.tp-header i {
+  width: 14px; height: 4px; border-radius: 2px;
+  background: var(--accent-primary);
+}
+.tp-header i + i { width: 10px; background: var(--text-muted); }
+.tp-body { padding: 6px 5px; display: flex; flex-direction: column; gap: 4px; }
+.tp-line { height: 4px; border-radius: 2px; background: var(--bg-tertiary); }
+.tp-line.texto { background: var(--text-muted); width: 70%; }
+.tp-total {
+  height: 8px; border-radius: 2px; width: 55%;
+  background: var(--accent-success);
+  align-self: flex-end;
+}
+.tp-footer {
+  display: flex; gap: 4px; padding: 0 5px 6px;
+}
+.tp-btn { flex: 1; height: 9px; border-radius: 3px; }
+.tp-btn-primary { background: var(--accent-primary); }
+.tp-btn-warning { background: var(--accent-warning); }
+.tp-btn-danger  { background: var(--accent-danger); }
+
+/* Botao de tema no header do PDV */
+.btn-tema {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.btn-tema:hover { background: var(--bg-hover); color: var(--text-primary); }

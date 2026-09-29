@@ -5,7 +5,8 @@ interface
 uses
   System.SysUtils, System.Classes, System.IniFiles,System.UITypes, Uni, UniProvider, SQLiteUniProvider, OracleUniProvider,
   ACBrBase, ACBrDFe, ACBrDFeSSL,ACBrNFe, ACBrBAL, ACBrLCB, pcnConversao, pcnConversaoNFe,DBAccess,ACBrDFeReport,uSQLiteDB,
-  uConstantesWeb, uTypesApoloWeb, Data.DB, ACBrDFeDANFeReport, ACBrNFeDANFEClass, ACBrNFCeDANFeFPDF;
+  uConstantesWeb, uTypesApoloWeb, uTEF, Data.DB, ACBrDFeDANFeReport, ACBrNFeDANFEClass, ACBrNFCeDANFeFPDF,
+  ACBrPosPrinter, ACBrNFeDANFeESCPOS;
 
 
 type
@@ -24,11 +25,25 @@ type
     procedure DataModuleDestroy(Sender: TObject);
   private
     FSQLiteDB: TSQLiteDB;
-    FTipoConexao: TConexaoServidor;
     FConectadoOracle: Boolean;
     FCodFilial: string;
     FNumCaixa: Integer;
     FNumSerieHD: string;
+    FTEFHabilitado: Boolean;
+    FTEFUrl: string;
+    FTEFConfig: TTEFConfig;
+
+    // Impressao do cupom: SUMATRA (PDF via app externo) ou ESCPOS (direto na termica)
+    FModoImpressao: string;
+    FImpressoraCupom: string;
+    FEscPosModelo: string;
+    FEscPosPorta: string;
+    FEscPosColunas: Integer;
+    FPosPrinter: TACBrPosPrinter;
+    FDANFeESCPOS: TACBrNFeDANFeESCPOS;
+
+    function GetImpressaoEscPos: Boolean;
+    procedure ConfigurarImpressaoCupom;
 
     procedure ConfigurarConexaoOracle;
 
@@ -43,16 +58,36 @@ type
     procedure DesconectarOracle;
     function TestarConexaoOracle: Boolean;
 
+    // Reaplica certificado/CSC no ACBr (usado quando a carga geral rebaixa o PFX)
+    procedure RecarregarConfiguracaoNFCe;
+
     // Queries Oracle
     function ExecutarSelectOracle(const ASQL: string): TUniQuery;
     procedure ExecutarSQLOracle(const ASQL: string);
 
     property SQLiteDB: TSQLiteDB read FSQLiteDB;
-    property TipoConexao: TConexaoServidor read FTipoConexao;
     property ConectadoOracle: Boolean read FConectadoOracle;
     property CodFilial: string read FCodFilial;
     property NumCaixa: Integer read FNumCaixa;
     property NumSerieHD: string read FNumSerieHD;
+    property TEFHabilitado: Boolean read FTEFHabilitado;
+    property TEFUrl: string read FTEFUrl;
+    // Config completa do TEF (modo http ou arquivo) - ver [TEF] no apoloweb.ini
+    property TEFConfig: TTEFConfig read FTEFConfig;
+
+    // Reaplica [impressao] do apoloweb.ini (usado pela tela de parametros)
+    procedure RecarregarConfiguracaoImpressao;
+    // Modelos ESC/POS aceitos pelo ACBrPosPrinter (para o combo da tela)
+    function ModelosPosPrinter: TArray<string>;
+
+    // Impressao do cupom
+    property ImpressaoEscPos: Boolean read GetImpressaoEscPos;
+    property ModoImpressao: string read FModoImpressao;
+    property ImpressoraCupom: string read FImpressoraCupom;
+    property EscPosModelo: string read FEscPosModelo;
+    property EscPosPorta: string read FEscPosPorta;
+    property EscPosColunas: Integer read FEscPosColunas;
+    property PosPrinter: TACBrPosPrinter read FPosPrinter;
   end;
 
 var
@@ -63,7 +98,7 @@ implementation
 {$R *.dfm}
 
 uses
-  Winapi.Windows, System.Win.Registry, Vcl.Dialogs, uFrmConfigConexao;
+  Winapi.Windows, System.Win.Registry, System.TypInfo, Vcl.Dialogs, uFrmConfigConexao;
 
 // =========================================================================
 // LIFECYCLE
@@ -81,15 +116,29 @@ begin
   LUsarCache := False;
 
   // 1. Inicializar SQLite
+  // Falha aqui nao pode seguir adiante: o VCL engole a excecao do OnCreate do
+  // DataModule e o app subiria sem bridge, transformando toda acao do JS em
+  // Access Violation. Melhor abortar com o motivo na tela.
   FSQLiteDB := TSQLiteDB.Create(ARQUIVO_SQLITE);
-  FSQLiteDB.CriarBanco;
+  try
+    FSQLiteDB.CriarBanco;
+  except
+    on E: Exception do
+    begin
+      MessageDlg('Falha ao abrir o banco local:' + sLineBreak +
+        ARQUIVO_SQLITE + sLineBreak + sLineBreak + E.Message + sLineBreak + sLineBreak +
+        'Verifique se outra copia do ApoloWeb (ou um visualizador de SQLite) ' +
+        'esta com o arquivo aberto.', mtError, [mbOK], 0);
+      Halt(2);
+    end;
+  end;
 
   // 2. Obter serial do HD
   FNumSerieHD := ObterSerialHD;
   if FNumSerieHD <> '' then
     FSQLiteDB.SalvarEstado(KEY_HD_SERIAL, FNumSerieHD);
 
-  // 3. Carregar configuracao de conexao (Registry -> apenas Broker/wsOra)
+  // 3. Carregar configuracao de conexao (apoloweb.ini: Oracle, TEF, impressao)
   CarregarConfiguracao;
 
   // 4. Tentar conectar ao Oracle e carregar parametros
@@ -264,6 +313,9 @@ begin
     Result.SenhaCertificado := LQuery.FieldByName('senha_certificado').AsString;
     Result.AmbienteNFe := LQuery.FieldByName('ambiente_nfe').AsString;
     Result.UFWebService := LQuery.FieldByName('uf_web_service_nfe').AsString;
+    // Sem uf_web_service_nfe preenchida, usar a UF da propria filial
+    if Trim(Result.UFWebService) = '' then
+      Result.UFWebService := Result.UF;
     Result.CodConsumidor := LQuery.FieldByName('codconsumidor').AsInteger;
     Result.CRT := LQuery.FieldByName('crt').AsInteger;
     Result.RegimeTributario := LQuery.FieldByName('crt').AsInteger;
@@ -338,89 +390,103 @@ end;
 // =========================================================================
 
 procedure TDmApoloWeb.CarregarConfiguracao;
-var
-  LReg: TRegistry;
 begin
-  LReg := TRegistry.Create;
-  try
-    LReg.RootKey := HKEY_CURRENT_USER;
-
-    // Determinar tipo de conexao (apenas dados de conexao do Registry)
-    if LReg.OpenKey(REG_SEC_BROKER, False) then
-    begin
-      if LReg.ValueExists('Porta') and (LReg.ReadInteger('Porta') > 0) then
-        FTipoConexao := conBroker;
-      LReg.CloseKey;
-    end;
-
-    if LReg.OpenKey(REG_SEC_WSORA, False) then
-    begin
-      if LReg.ValueExists('Porta') and (LReg.ReadInteger('Porta') > 0) then
-        FTipoConexao := conSoap;
-      LReg.CloseKey;
-    end;
-  finally
-    LReg.Free;
-  end;
-
-  // Configurar conexao Oracle
   ConfigurarConexaoOracle;
 end;
 
 procedure TDmApoloWeb.ConfigurarConexaoOracle;
 var
-  LReg: TRegistry;
+  ini: TIniFile;
 begin
-  LReg := TRegistry.Create;
+  ini:=TIniFile.Create('c:\apolo\apoloweb.ini');
   try
-    LReg.RootKey := HKEY_CURRENT_USER;
+    UniConnOracle.ProviderName := 'Oracle';
+    UniConnOracle.Server   := ini.ReadString('oracle','server','');
+    UniConnOracle.Username := ini.ReadString('oracle','username','');
+    UniConnOracle.Password := ini.ReadString('oracle','password','');
+    UniConnOracle.LoginPrompt := False;
+    If Pos(':',UniConnOracle.Server)>0 Then
+      UniConnOracle.SpecificOptions.Values['Direct']:='True';
+    // TEF - dois modos de integracao:
+    //   modo=http    -> POST JSON no TefGpAPI (url)
+    //   modo=arquivo -> intercambio intpos.001/intpos.sts nas pastas Req/Resp
+    //                   do gerenciador Tef_Dial/GetPay (dispensa a API HTTP)
+    FTEFHabilitado := ini.ReadBool('TEF','habilitado', False);
+    FTEFUrl := ini.ReadString('TEF','url', TEF_URL_PADRAO);
 
-    case FTipoConexao of
-      conDireta:
-      begin
-        if LReg.OpenKey(REG_SEC_WSORA, False) then
-        begin
-          UniConnOracle.ProviderName := 'Oracle';
-          if LReg.ValueExists('servidor') then
-            UniConnOracle.Server := LReg.ReadString('servidor');
-          if LReg.ValueExists('usuario') then
-            UniConnOracle.Username := LReg.ReadString('usuario');
-          if LReg.ValueExists('senha') then
-            UniConnOracle.Password := LReg.ReadString('senha');
-          if LReg.ValueExists('Porta') then
-            UniConnOracle.Port := LReg.ReadInteger('Porta');
-          UniConnOracle.LoginPrompt := False;
-          If Pos(':',UniConnOracle.Server)>0 Then
-            UniConnOracle.SpecificOptions.Values['Direct']:='True';
+    FTEFConfig.Habilitado := FTEFHabilitado;
+    FTEFConfig.Modo       := TEFModoFromString(
+                               ini.ReadString('TEF','modo', TEF_MODO_HTTP));
+    FTEFConfig.Url        := FTEFUrl;
+    FTEFConfig.PastaReq   := ini.ReadString('TEF','pasta_req', TEF_PASTA_REQ_PADRAO);
+    FTEFConfig.PastaResp  := ini.ReadString('TEF','pasta_resp', TEF_PASTA_RESP_PADRAO);
+    FTEFConfig.TimeoutSeg := ini.ReadInteger('TEF','timeout', TEF_TIMEOUT_PADRAO);
+    FTEFConfig.Debug      := ini.ReadBool('TEF','debug', False);
+    FTEFConfig.Identificacao := FNumCaixa;
 
-          LReg.CloseKey;
-        end;
-      end;
-      conBroker, conSoap:
-      begin
-        // Para Broker/SOAP, configurar tambem conexao direta Oracle
-        // pois BLOBs (certificado, logo) precisam de acesso direto
-        if LReg.OpenKey(REG_SEC_WSORA, False) then
-        begin
-          UniConnOracle.ProviderName := 'Oracle';
-          if LReg.ValueExists('servidor') then
-            UniConnOracle.Server := LReg.ReadString('servidor');
-          if LReg.ValueExists('usuario') then
-            UniConnOracle.Username := LReg.ReadString('usuario');
-          if LReg.ValueExists('senha') then
-            UniConnOracle.Password := LReg.ReadString('senha');
-          if LReg.ValueExists('Porta') then
-            UniConnOracle.Port := LReg.ReadInteger('Porta');
-          If Pos(':',UniConnOracle.Server)>0 Then
-            UniConnOracle.SpecificOptions.Values['Direct']:='True';
-          UniConnOracle.LoginPrompt := False;
-          LReg.CloseKey;
-        end;
-      end;
-    end;
+    // QR Code do PIX pelo TEF: pinpad (a adquirente desenha no visor) ou tela
+    // (o PDV exibe o BR Code que o gerenciador devolver). Ver uTEF.pas.
+    FTEFConfig.PixQr        := TEFPixQrFromString(
+                                 ini.ReadString('TEF','pix_qr', TEF_PIX_QR_PADRAO));
+    FTEFConfig.PixQrCampos  := ini.ReadString('TEF','pix_qr_campos', TEF_PIX_QR_AUTO);
+    FTEFConfig.PixQrChaves  := ini.ReadString('TEF','pix_qr_chaves', TEF_PIX_QR_AUTO);
+
+    // Impressao do cupom (DANFCe)
+    //   modo=SUMATRA : gera PDF e imprime via SumatraPDF (fallback PrintCupon)
+    //   modo=ESCPOS  : imprime direto na termica via ACBrPosPrinter (sem PDF)
+    FModoImpressao   := UpperCase(Trim(ini.ReadString('impressao','modo','SUMATRA')));
+    FImpressoraCupom := ini.ReadString('impressao','impressora','');
+    FEscPosModelo    := ini.ReadString('impressao','escpos_modelo','ppEscPosEpson');
+    FEscPosPorta     := ini.ReadString('impressao','escpos_porta','');
+    FEscPosColunas   := ini.ReadInteger('impressao','escpos_colunas', 48);
   finally
-    LReg.Free;
+    ini.Free;
   end;
+end;
+
+function TDmApoloWeb.GetImpressaoEscPos: Boolean;
+begin
+  Result := FModoImpressao = 'ESCPOS';
+end;
+
+procedure TDmApoloWeb.ConfigurarImpressaoCupom;
+var
+  LModelo: Integer;
+  LPorta: string;
+begin
+  if not ImpressaoEscPos then Exit;
+
+  if FPosPrinter = nil then
+  begin
+    FPosPrinter := TACBrPosPrinter.Create(Self);
+    FDANFeESCPOS := TACBrNFeDANFeESCPOS.Create(Self);
+    FDANFeESCPOS.PosPrinter := FPosPrinter;
+  end;
+
+  // O ACBrDevice RECUSA trocar de porta com o device ativo (SetPorta levanta
+  // excecao), e a impressora fica ativa desde a primeira impressao - nem o
+  // teste nem o cupom desativam depois. Sem este Desativar, salvar uma porta
+  // nova gravava o ini mas a impressora continuava na porta antiga: o teste
+  // ia para o lugar velho e nao saia nada, sem erro visivel na tela.
+  if FPosPrinter.Ativo then
+    FPosPrinter.Desativar;
+
+  // Modelo do INI como nome do enum (ex: ppEscPosEpson, ppEscBematech)
+  LModelo := GetEnumValue(TypeInfo(TACBrPosPrinterModelo), FEscPosModelo);
+  if LModelo < 0 then
+    LModelo := Ord(ppEscPosEpson);
+  FPosPrinter.Modelo := TACBrPosPrinterModelo(LModelo);
+
+  // Porta: escpos_porta explicita (COM3, TCP:ip:9100, RAW:Nome...) ou, se
+  // vazia, spooler RAW na impressora configurada em [impressao] impressora=
+  LPorta := Trim(FEscPosPorta);
+  if (LPorta = '') and (Trim(FImpressoraCupom) <> '') then
+    LPorta := 'RAW:' + Trim(FImpressoraCupom);
+  FPosPrinter.Porta := LPorta;
+  FPosPrinter.ColunasFonteNormal := FEscPosColunas;
+
+  // O DANFe do ACBrNFe passa a ser o ESC/POS (Imprimir vai direto na termica)
+  ACBrNFe.DANFE := FDANFeESCPOS;
 end;
 
 procedure TDmApoloWeb.ConfigurarACBrNFCe(const AParams: TParametrosFilial);
@@ -442,7 +508,9 @@ begin
   ACBrNFe.Configuracoes.Geral.ValidarDigest := True;
 
   // Ambiente e UF (da tabela msfilial)
-  if AParams.AmbienteNFe = '1' then
+  // ambiente_nfe: '1' ou 'P' = producao; qualquer outro valor = homologacao
+  if (AParams.AmbienteNFe = '1') or
+     SameText(Copy(Trim(AParams.AmbienteNFe), 1, 1), 'P') then
     ACBrNFe.Configuracoes.WebServices.Ambiente := taProducao
   else
     ACBrNFe.Configuracoes.WebServices.Ambiente := taHomologacao;
@@ -472,6 +540,65 @@ begin
     except
       // Logo invalido ou formato incompativel - continuar sem logo
     end;
+
+  // Se [impressao] modo=ESCPOS, troca o DANFE para impressao direta na termica
+  ConfigurarImpressaoCupom;
+end;
+
+function TDmApoloWeb.ModelosPosPrinter: TArray<string>;
+var
+  LInfo: PTypeInfo;
+  LData: PTypeData;
+  I: Integer;
+begin
+  LInfo := TypeInfo(TACBrPosPrinterModelo);
+  LData := GetTypeData(LInfo);
+  SetLength(Result, LData.MaxValue - LData.MinValue + 1);
+  for I := LData.MinValue to LData.MaxValue do
+    Result[I - LData.MinValue] := GetEnumName(LInfo, I);
+end;
+
+// Rele a secao [impressao] do apoloweb.ini e reaplica no ACBr, sem reiniciar
+// o caixa. Voltando para SUMATRA o DANFE precisa retornar ao gerador de PDF,
+// senao o cupom continuaria saindo pelo ESC/POS da configuracao anterior.
+procedure TDmApoloWeb.RecarregarConfiguracaoImpressao;
+var
+  ini: TIniFile;
+begin
+  ini := TIniFile.Create(ARQ_APOLOWEB_INI);
+  try
+    FModoImpressao   := UpperCase(Trim(ini.ReadString('impressao','modo','SUMATRA')));
+    FImpressoraCupom := ini.ReadString('impressao','impressora','');
+    FEscPosModelo    := ini.ReadString('impressao','escpos_modelo','ppEscPosEpson');
+    FEscPosPorta     := ini.ReadString('impressao','escpos_porta','');
+    FEscPosColunas   := ini.ReadInteger('impressao','escpos_colunas', 48);
+  finally
+    ini.Free;
+  end;
+
+  if ImpressaoEscPos then
+    ConfigurarImpressaoCupom
+  else
+    ACBrNFe.DANFE := ACBrNFeDANFCe;
+end;
+
+// Reaplica no ACBr o certificado e os dados fiscais do cache SQLite. Chamado
+// depois que a carga geral rebaixa o PFX que estava faltando em disco - sem
+// isso o ACBr continuaria com ArquivoPFX vazio (app iniciado sem certificado).
+procedure TDmApoloWeb.RecarregarConfiguracaoNFCe;
+var
+  LParams: TParametrosFilial;
+begin
+  if not FileExists(ARQUIVO_CERTIFICADO) then Exit;
+
+  LParams := Default(TParametrosFilial);
+  LParams.CodFilial := FCodFilial;
+  LParams.SenhaCertificado := FSQLiteDB.ObterEstado('SENHA_CERTIFICADO', '');
+  LParams.CSC := FSQLiteDB.ObterEstado('CSC', '');
+  LParams.IDCSC := FSQLiteDB.ObterEstado('IDCSC', '');
+  LParams.AmbienteNFe := FSQLiteDB.ObterEstado('AMBIENTE_NFE', '2');
+  LParams.UFWebService := FSQLiteDB.ObterEstado('UF_WEBSERVICE', 'SP');
+  ConfigurarACBrNFCe(LParams);
 end;
 
 // =========================================================================

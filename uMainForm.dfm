@@ -1,10 +1,10 @@
 object FrmMain: TFrmMain
   Left = 0
   Top = 0
-  Caption = 'ApoloWeb - Frente de Caixa'
+  Caption = #39
   ClientHeight = 768
   ClientWidth = 1366
-  Color = clBlack
+  Color = 1511695
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWhite
   Font.Height = -13
@@ -24,12 +24,12 @@ object FrmMain: TFrmMain
     Height = 768
     Align = alClient
     TabOrder = 0
-    AllowSingleSignOnUsingOSPrimaryAccount = False
-    TargetCompatibleBrowserVersion = '117.0.2045.28'
     UserDataFolder = 'C:\Apolo\WebView2Cache'
     OnCreateWebViewCompleted = EdgeBrowserCreateWebViewCompleted
     OnNavigationCompleted = EdgeBrowserNavigationCompleted
     OnWebMessageReceived = EdgeBrowserWebMessageReceived
+    ExplicitLeft = 24
+    ExplicitTop = 8
   end
   object TimerInit: TTimer
     Enabled = False

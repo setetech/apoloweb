@@ -3,7 +3,7 @@ object FrmConfigConexao: TFrmConfigConexao
   Top = 0
   BorderStyle = bsDialog
   Caption = 'Configuracao - ApoloWeb'
-  ClientHeight = 455
+  ClientHeight = 585
   ClientWidth = 450
   Color = 3355443
   Font.Charset = DEFAULT_CHARSET
@@ -14,6 +14,151 @@ object FrmConfigConexao: TFrmConfigConexao
   Position = poScreenCenter
   OnCreate = FormCreate
   TextHeight = 17
+  object LblSecConexao: TLabel
+    Left = 24
+    Top = 55
+    Width = 116
+    Height = 17
+    Caption = 'CONEXAO ORACLE'
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = 8421631
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object LblServidor: TLabel
+    Left = 24
+    Top = 82
+    Width = 52
+    Height = 17
+    Caption = 'Servidor:'
+  end
+  object LblPorta: TLabel
+    Left = 24
+    Top = 114
+    Width = 34
+    Height = 17
+    Caption = 'Porta:'
+  end
+  object LblUsuario: TLabel
+    Left = 24
+    Top = 146
+    Width = 48
+    Height = 17
+    Caption = 'Usuario:'
+  end
+  object LblSenhaDB: TLabel
+    Left = 24
+    Top = 178
+    Width = 58
+    Height = 17
+    Caption = 'Senha BD:'
+  end
+  object LblStatus: TLabel
+    Left = 160
+    Top = 220
+    Width = 265
+    Height = 17
+    AutoSize = False
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clYellow
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = []
+    ParentFont = False
+  end
+  object BevelSep1: TBevel
+    Left = 24
+    Top = 255
+    Width = 400
+    Height = 2
+  end
+  object LblSecNFCe: TLabel
+    Left = 24
+    Top = 268
+    Width = 37
+    Height = 17
+    Caption = 'NFC-e'
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = 8421631
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object LblProxNFCe: TLabel
+    Left = 24
+    Top = 296
+    Width = 91
+    Height = 17
+    Caption = 'Prox. num. nNF:'
+  end
+  object LblSerieNFCe: TLabel
+    Left = 270
+    Top = 296
+    Width = 32
+    Height = 17
+    Caption = 'Serie:'
+  end
+  object BevelSep2: TBevel
+    Left = 24
+    Top = 333
+    Width = 400
+    Height = 2
+  end
+  object LblSecTEF: TLabel
+    Left = 24
+    Top = 346
+    Width = 24
+    Height = 17
+    Caption = 'TEF'
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = 8421631
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
+  object LblTEFUrl: TLabel
+    Left = 24
+    Top = 398
+    Width = 79
+    Height = 17
+    Caption = 'URL ScopeAPI:'
+  end
+  object LblStatusTEF: TLabel
+    Left = 160
+    Top = 434
+    Width = 265
+    Height = 17
+    AutoSize = False
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clYellow
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = []
+    ParentFont = False
+  end
+  object BevelSep3: TBevel
+    Left = 24
+    Top = 462
+    Width = 400
+    Height = 2
+  end
+  object LblSenhaAdmin: TLabel
+    Left = 24
+    Top = 477
+    Width = 86
+    Height = 17
+    Caption = 'Senha Admin:'
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = 8421631
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = [fsBold]
+    ParentFont = False
+  end
   object PnlTitulo: TPanel
     Left = 0
     Top = 0
@@ -31,26 +176,6 @@ object FrmConfigConexao: TFrmConfigConexao
     ParentFont = False
     TabOrder = 0
   end
-  object LblSecConexao: TLabel
-    Left = 24
-    Top = 55
-    Width = 120
-    Height = 17
-    Caption = 'CONEXAO ORACLE'
-    Font.Charset = DEFAULT_CHARSET
-    Font.Color = 8421631
-    Font.Height = -13
-    Font.Name = 'Segoe UI'
-    Font.Style = [fsBold]
-    ParentFont = False
-  end
-  object LblServidor: TLabel
-    Left = 24
-    Top = 82
-    Width = 52
-    Height = 17
-    Caption = 'Servidor:'
-  end
   object EdtServidor: TEdit
     Left = 130
     Top = 79
@@ -64,13 +189,6 @@ object FrmConfigConexao: TFrmConfigConexao
     Font.Style = []
     ParentFont = False
     TabOrder = 1
-  end
-  object LblPorta: TLabel
-    Left = 24
-    Top = 114
-    Width = 34
-    Height = 17
-    Caption = 'Porta:'
   end
   object EdtPorta: TEdit
     Left = 130
@@ -87,13 +205,6 @@ object FrmConfigConexao: TFrmConfigConexao
     TabOrder = 2
     Text = '1521'
   end
-  object LblUsuario: TLabel
-    Left = 24
-    Top = 146
-    Width = 48
-    Height = 17
-    Caption = 'Usuario:'
-  end
   object EdtUsuario: TEdit
     Left = 130
     Top = 143
@@ -107,13 +218,6 @@ object FrmConfigConexao: TFrmConfigConexao
     Font.Style = []
     ParentFont = False
     TabOrder = 3
-  end
-  object LblSenhaDB: TLabel
-    Left = 24
-    Top = 178
-    Width = 58
-    Height = 17
-    Caption = 'Senha BD:'
   end
   object EdtSenhaDB: TEdit
     Left = 130
@@ -139,45 +243,6 @@ object FrmConfigConexao: TFrmConfigConexao
     TabOrder = 5
     OnClick = BtnTestarClick
   end
-  object LblStatus: TLabel
-    Left = 160
-    Top = 220
-    Width = 265
-    Height = 17
-    AutoSize = False
-    Font.Charset = DEFAULT_CHARSET
-    Font.Color = clYellow
-    Font.Height = -13
-    Font.Name = 'Segoe UI'
-    Font.Style = []
-    ParentFont = False
-  end
-  object BevelSep1: TBevel
-    Left = 24
-    Top = 255
-    Width = 400
-    Height = 2
-  end
-  object LblSecNFCe: TLabel
-    Left = 24
-    Top = 268
-    Width = 40
-    Height = 17
-    Caption = 'NFC-e'
-    Font.Charset = DEFAULT_CHARSET
-    Font.Color = 8421631
-    Font.Height = -13
-    Font.Name = 'Segoe UI'
-    Font.Style = [fsBold]
-    ParentFont = False
-  end
-  object LblProxNFCe: TLabel
-    Left = 24
-    Top = 296
-    Width = 87
-    Height = 17
-    Caption = 'Prox. num. nNF:'
-  end
   object EdtProxNFCe: TEdit
     Left = 130
     Top = 293
@@ -191,13 +256,6 @@ object FrmConfigConexao: TFrmConfigConexao
     Font.Style = []
     ParentFont = False
     TabOrder = 6
-  end
-  object LblSerieNFCe: TLabel
-    Left = 270
-    Top = 296
-    Width = 35
-    Height = 17
-    Caption = 'Serie:'
   end
   object EdtSerieNFCe: TEdit
     Left = 315
@@ -213,28 +271,46 @@ object FrmConfigConexao: TFrmConfigConexao
     ParentFont = False
     TabOrder = 7
   end
-  object BevelSep2: TBevel
+  object ChkTEFHabilitado: TCheckBox
     Left = 24
-    Top = 333
-    Width = 400
-    Height = 2
-  end
-  object LblSenhaAdmin: TLabel
-    Left = 24
-    Top = 350
-    Width = 86
+    Top = 370
+    Width = 200
     Height = 17
-    Caption = 'Senha Admin:'
+    Caption = 'Habilitar TEF (ScopeAPI)'
     Font.Charset = DEFAULT_CHARSET
-    Font.Color = 8421631
+    Font.Color = clWhite
     Font.Height = -13
     Font.Name = 'Segoe UI'
-    Font.Style = [fsBold]
+    Font.Style = []
     ParentFont = False
+    TabOrder = 8
+  end
+  object EdtTEFUrl: TEdit
+    Left = 130
+    Top = 395
+    Width = 295
+    Height = 25
+    Color = 4473924
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWhite
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = []
+    ParentFont = False
+    TabOrder = 9
+  end
+  object BtnTestarTEF: TButton
+    Left = 24
+    Top = 428
+    Width = 120
+    Height = 30
+    Caption = 'Testar TEF'
+    TabOrder = 10
+    OnClick = BtnTestarTEFClick
   end
   object EdtSenhaAdmin: TEdit
     Left = 130
-    Top = 347
+    Top = 474
     Width = 295
     Height = 25
     Color = 4473924
@@ -245,24 +321,24 @@ object FrmConfigConexao: TFrmConfigConexao
     Font.Style = []
     ParentFont = False
     PasswordChar = '*'
-    TabOrder = 8
+    TabOrder = 11
   end
   object BtnSalvar: TButton
     Left = 215
-    Top = 400
+    Top = 530
     Width = 100
     Height = 33
     Caption = 'Salvar'
-    TabOrder = 9
+    TabOrder = 12
     OnClick = BtnSalvarClick
   end
   object BtnCancelar: TButton
     Left = 325
-    Top = 400
+    Top = 530
     Width = 100
     Height = 33
     Caption = 'Cancelar'
     ModalResult = 2
-    TabOrder = 10
+    TabOrder = 13
   end
 end

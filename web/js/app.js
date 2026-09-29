@@ -15,6 +15,7 @@ const ApoloApp = {
     Payment.init();
     NFCePanel.init();
     Reports.init();
+    Screensaver.init();
     Utils.initCurrencyMasks();
 
     // Bind close buttons nos modais
@@ -50,6 +51,9 @@ const ApoloApp = {
     if (view) {
       view.classList.add('active');
       this.currentView = viewId;
+
+      // Logotipo da loja no header (nao bloqueia a troca de tela)
+      if (viewId === 'view-pos') Logo.carregar();
 
       // Focar no input correto
       setTimeout(() => {
@@ -166,10 +170,26 @@ const ApoloApp = {
     }
   },
 
+  // Versao do executavel (VERSIONINFO) nos cantos discretos: rodape do login
+  // e ao lado do logo no header do PDV.
+  mostrarVersao(versao) {
+    if (!versao) return;
+    const texto = 'v' + String(versao).replace(/^v/i, '');
+    ['login-versao', 'pos-versao'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    });
+  },
+
   // Receber mensagens do Delphi
   onMessage(action, data) {
     switch (action) {
       case 'init':
+        // Configurar TEF antes de qualquer outra coisa
+        if (data.tefHabilitado !== undefined) {
+          Payment.aplicarConfigTEF(data.tefHabilitado, data.tefPixQrTela);
+        }
+        this.mostrarVersao(data.versaoExe || data.versao);
         // Dados iniciais do sistema
         if (data.operador && data.estadoCaixa > 0) {
           POS.setHeaderInfo(data.numCaixa, data.operador);
@@ -194,6 +214,27 @@ const ApoloApp = {
       case 'contingencia_update':
         // Status de contingencia mudou
         NFCePanel.atualizarStatusConexao();
+        break;
+
+      case 'tefResultado':
+        // Resultado de transacao TEF (push do Delphi)
+        Payment._onTEFResultado(data);
+        break;
+
+      case 'tefPixQrCode':
+        // [TEF] pix_qr=tela: o gerenciador devolveu o BR Code no meio da
+        // transacao e o PDV desenha o QR enquanto o cliente paga
+        Payment._onTEFPixQrCode(data);
+        break;
+
+      case 'tefAdmResultado':
+        // Menu administrativo do gerenciador: so volta quando o operador sai
+        TEFAdm.onResultadoAdm(data);
+        break;
+
+      case 'tefEstornoResultado':
+        // Resultado do CNC disparado pela aba TEF
+        TEFAdm.onResultadoEstorno(data);
         break;
 
       default:

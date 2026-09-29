@@ -13,9 +13,6 @@ function VarToIntDef(const AValue: Variant; ADefault: Integer): Integer;
 function ValidarGTIN(const ACodBarra: string): string;
 
 type
-  // Tipo de conexao com o servidor
-  TConexaoServidor = (conSoap, conBroker, conDireta);
-
   // Tipo de contingencia NFCe (corrigido - antes era apenas Boolean)
   TTipoContingencia = (
     tcNenhuma,   // Operacao normal
@@ -31,7 +28,8 @@ type
     scEnviado,     // Enviado ao SEFAZ
     scAutorizado,  // Autorizado pelo SEFAZ
     scRejeitado,   // Rejeitado pelo SEFAZ
-    scCancelado    // Cancelado
+    scCancelado,   // Cancelado
+    scDescartado   // Tirado da fila pelo operador (nao volta a ser enviado)
   );
 
   // Estado do caixa
@@ -146,6 +144,7 @@ type
   TContingenciaHelper = record helper for TTipoContingencia
     function ToString: string;
     function ToACBrTpEmis: Integer;
+    class function FromString(const AValue: string): TTipoContingencia; static;
   end;
 
   TEstadoCaixaHelper = record helper for TEstadoCaixa
@@ -248,6 +247,19 @@ begin
   else
     Result := 0;
   end;
+end;
+
+class function TContingenciaHelper.FromString(
+  const AValue: string): TTipoContingencia;
+var
+  LValor: string;
+begin
+  LValor := UpperCase(Trim(AValue));
+  if LValor = 'OFFLINE' then Result := tcOffLine
+  else if LValor = 'SVC_AN' then Result := tcSVCAN
+  else if LValor = 'SVC_RS' then Result := tcSVCRS
+  else if LValor = 'SVC_SP' then Result := tcSVCSP
+  else Result := tcNenhuma;  // 'NORMAL', '' ou valor desconhecido
 end;
 
 { TEstadoCaixaHelper }

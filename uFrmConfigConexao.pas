@@ -5,7 +5,7 @@ interface
 uses
   Winapi.Windows, System.SysUtils, System.Classes, Vcl.Graphics, Vcl.Controls,
   Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls, System.Win.Registry,
-  Uni, OracleUniProvider, System.UITypes, uConstantesWeb;
+  Uni, OracleUniProvider, System.UITypes, uConstantesWeb,IniFiles;
 
 type
   TFrmConfigConexao = class(TForm)
@@ -30,14 +30,22 @@ type
     BevelSep2: TBevel;
     LblSenhaAdmin: TLabel;
     EdtSenhaAdmin: TEdit;
+    ChkTEFHabilitado: TCheckBox;
+    LblSecTEF: TLabel;
+    LblTEFUrl: TLabel;
+    EdtTEFUrl: TEdit;
+    BtnTestarTEF: TButton;
+    LblStatusTEF: TLabel;
+    BevelSep3: TBevel;
     BtnSalvar: TButton;
     BtnCancelar: TButton;
     procedure FormCreate(Sender: TObject);
     procedure BtnTestarClick(Sender: TObject);
     procedure BtnSalvarClick(Sender: TObject);
+    procedure BtnTestarTEFClick(Sender: TObject);
   private
     procedure CarregarDoRegistry;
-    procedure SalvarNoRegistry;
+    procedure SalvarNoApoloIni;
     procedure CarregarNFCeDoSQLite;
     procedure SalvarNFCeNoSQLite;
     function TestarConexao: Boolean;
@@ -52,7 +60,7 @@ implementation
 {$R *.dfm}
 
 uses
-  uDmApoloWeb;
+  uDmApoloWeb, uTEF;
 
 // =========================================================================
 // FUNCAO PUBLICA - ABRE CONFIG DIRETO
@@ -133,7 +141,7 @@ begin
     Exit;
   end;
 
-  SalvarNoRegistry;
+  SalvarNoApoloIni;
   SalvarNFCeNoSQLite;
   ModalResult := mrOk;
 end;
@@ -156,48 +164,40 @@ end;
 // =========================================================================
 
 procedure TFrmConfigConexao.CarregarDoRegistry;
-var
-  LReg: TRegistry;
+var ini: TIniFile;
 begin
-  LReg := TRegistry.Create;
+  ini:=TIniFile.Create('c:\apolo\apoloweb.ini');
   try
-    LReg.RootKey := HKEY_CURRENT_USER;
-    if LReg.OpenKey(REG_SEC_WSORA, False) then
-    begin
-      if LReg.ValueExists('servidor') then
-        EdtServidor.Text := LReg.ReadString('servidor');
-      if LReg.ValueExists('Porta') then
-        EdtPorta.Text := IntToStr(LReg.ReadInteger('Porta'));
-      if LReg.ValueExists('usuario') then
-        EdtUsuario.Text := LReg.ReadString('usuario');
-      if LReg.ValueExists('senha') then
-        EdtSenhaDB.Text := LReg.ReadString('senha');
-      LReg.CloseKey;
-    end;
+    EdtServidor.Text   := ini.ReadString('oracle','server','');
+    EdtPorta.Text      := ini.ReadString('oracle','port','');
+    EdtUsuario.Text    := ini.ReadString('oracle','username','');
+    EdtSenhaDB.Text    := ini.ReadString('oracle','password','');
+    // TEF
+    ChkTEFHabilitado.Checked := ini.ReadBool('TEF','habilitado', False);
+    EdtTEFUrl.Text           := ini.ReadString('TEF','url', TEF_URL_PADRAO);
   finally
-    LReg.Free;
+    ini.Free;
   end;
 end;
 
-procedure TFrmConfigConexao.SalvarNoRegistry;
+procedure TFrmConfigConexao.SalvarNoApoloIni;
 var
-  LReg: TRegistry;
+  ini: TIniFile;
 begin
-  LReg := TRegistry.Create;
+  ini:=TIniFile.Create('c:\apolo\apoloweb.ini');
   try
-    LReg.RootKey := HKEY_CURRENT_USER;
-    if LReg.OpenKey(REG_SEC_WSORA, True) then
-    begin
-      LReg.WriteString('servidor', Trim(EdtServidor.Text));
-      LReg.WriteInteger('Porta', StrToIntDef(EdtPorta.Text, 1521));
-      LReg.WriteString('usuario', Trim(EdtUsuario.Text));
-      LReg.WriteString('senha', EdtSenhaDB.Text);
-      LReg.CloseKey;
-    end;
+    ini.WriteString('Oracle','server',Trim(EdtServidor.Text));
+    ini.WriteString('Oracle','username',Trim(EdtUsuario.Text));
+    ini.WriteString('Oracle','password',Trim(EdtSenhaDB.Text));
+    ini.WriteString('Oracle','port',Trim(EdtPorta.Text));
+    // TEF
+    ini.WriteBool('TEF','habilitado', ChkTEFHabilitado.Checked);
+    ini.WriteString('TEF','url', Trim(EdtTEFUrl.Text));
   finally
-    LReg.Free;
+    ini.Free;
   end;
 end;
+
 
 // =========================================================================
 // SQLITE (NFC-e)
@@ -229,7 +229,48 @@ begin
 end;
 
 // =========================================================================
-// TESTE DE CONEXAO
+// TESTE DE CONEXAO TEF
+// =========================================================================
+
+procedure TFrmConfigConexao.BtnTestarTEFClick(Sender: TObject);
+var
+  LTEF: ITEFClient;
+  LConfig: TTEFConfig;
+begin
+  LblStatusTEF.Font.Color := clYellow;
+  LblStatusTEF.Caption := 'Testando TEF...';
+  Application.ProcessMessages;
+
+  // Testa no modo configurado em [TEF] modo: no http vale a url digitada aqui,
+  // no arquivo vale o par pasta_req/pasta_resp do ini.
+  LConfig := DmApoloWeb.TEFConfig;
+  LConfig.Habilitado := True;
+  if LConfig.Modo = tmHTTP then
+    LConfig.Url := Trim(EdtTEFUrl.Text);
+
+  LTEF := CriarTEFClient(LConfig);
+  try
+    if LTEF.ConsultarStatus then
+    begin
+      LblStatusTEF.Font.Color := clLime;
+      LblStatusTEF.Caption := 'TEF OK! (' + LConfig.ModoTexto + ')';
+    end
+    else
+    begin
+      LblStatusTEF.Font.Color := clRed;
+      LblStatusTEF.Caption := 'TEF indisponivel (' + LConfig.ModoTexto + ').';
+    end;
+  except
+    on E: Exception do
+    begin
+      LblStatusTEF.Font.Color := clRed;
+      LblStatusTEF.Caption := Copy(E.Message, 1, 80);
+    end;
+  end;
+end;
+
+// =========================================================================
+// TESTE DE CONEXAO ORACLE
 // =========================================================================
 
 function TFrmConfigConexao.TestarConexao: Boolean;

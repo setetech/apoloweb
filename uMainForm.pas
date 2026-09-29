@@ -5,9 +5,10 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants,
   System.Classes, Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
-  Vcl.Edge, Vcl.ExtCtrls, Winapi.WebView2, ActiveX,
-  uBridge, uSQLiteDB, uConstantesWeb, uTypesApoloWeb,
-  uContingencia, uNFCeWeb, uMonitorConexao, uSincronizacao;
+  Vcl.Edge, Vcl.ExtCtrls, Winapi.WebView2_Colosso, ActiveX,
+  uBridge, uSQLiteDB, uConstantesWeb, uTypesApoloWeb, uTEF,
+  uContingencia, uNFCeWeb, uMonitorConexao, uSincronizacao, uUploadWorker,
+  Winapi.WebView2;
 
 type
   TFrmMain = class(TForm)
@@ -33,7 +34,20 @@ type
     FNFCeManager: TNFCeWebManager;
     FMonitorConexao: TMonitorConexao;
     FSincronizador: TSincronizador;
+    // Download Oracle -> SQLite (sync automatica e F5) com conexao SQLite
+    // PROPRIA. Os threads de sync usavam a FSQLite da tela: um TUniConnection
+    // em dois threads ao mesmo tempo da Access Violation (log de 29/09 12:19),
+    // e o BEGIN TRANSACTION do download engolia na mesma transacao o que a
+    // venda gravasse no meio - um ROLLBACK levava junto. So os threads de
+    // sync usam (um por vez, FSincronizando); abertos dentro do thread.
+    FSQLiteSync: TSQLiteDB;
+    FSincronizadorDownload: TSincronizador;
+    // Envios para o Oracle (venda, XML, pendentes) fora do thread da tela
+    FUploadWorker: TUploadWorker;
     FSincronizando: Boolean;
+    // Quantas verificacoes de conexao seguidas foram puladas por causa de
+    // venda aberta (ver TestarConexaoServidor)
+    FProbesPulados: Integer;
     FTimerSync: TTimer;
     procedure InicializarSistema;
     procedure EnviarParaJS(const AAction, AData: string);
@@ -41,10 +55,25 @@ type
     procedure ConfigurarEdgeBrowser;
     // Callbacks para bridge
     procedure DoGerarNFCe(ACupomId: Integer; var AChaveNFe, AProtocolo: string);
+    procedure DoCancelarNFCe(ACupomId: Integer; const AJustificativa: string;
+      var ASucesso: Boolean; var AMensagem: string);
+    procedure DoReimprimirNFCe(const AChaveNFe: string;
+      var ASucesso: Boolean; var AMensagem: string);
     procedure DoRetransmitir(var AQtdEnviados, AQtdErros: Integer);
+    procedure DoRegerarNFCe(const AIds: TArray<Integer>;
+      var AQtdOk, AQtdErro: Integer; var AMensagem: string);
+    procedure DoUploadVenda(ACupomId: Integer);
+    procedure ConfigurarUploadWorker;
+    procedure DoRetrySync(Sender: TObject);
     procedure DoSincronizarDados;
+    procedure DoForcarSincronizacao;
+    procedure SincronizarDadosInterno(AForcar: Boolean);
+    procedure DoFecharApp(Sender: TObject);
     procedure OnStatusConexaoChanged(AOnline: Boolean; ATipo: TTipoContingencia);
+    function TestarConexaoServidor: Boolean;
     procedure TimerSyncTimer(Sender: TObject);
+    procedure OcultarTaskbar;
+    procedure ExibirTaskbar;
   public
     property Bridge: TApoloBridge read FBridge;
     property SQLite: TSQLiteDB read FSQLite;
@@ -64,17 +93,18 @@ implementation
 {$R *.dfm}
 
 uses
-  System.JSON, System.IOUtils, Uni, uDmApoloWeb, uFrmConfigConexao;
+  System.JSON, System.IOUtils, Uni, uDmApoloWeb, uFrmConfigConexao, uSyncLog;
 
 procedure TFrmMain.FormCreate(Sender: TObject);
 begin
   FWebViewReady := False;
 
-  // Configurar form
-  Caption := NOME_SISTEMA + ' - Frente de Caixa v' + VERSAO_SISTEMA;
-  WindowState := wsMaximized;
+  // Configurar form - tela cheia sem bordas (modo PDV)
   KeyPreview := True;
   Color := clBlack;
+  BorderStyle := bsNone;
+  OcultarTaskbar;
+  SetBounds(0, 0, Screen.Width, Screen.Height);
 
   // Configurar EdgeBrowser PRIMEIRO (prioridade - nao depende de nada)
   ConfigurarEdgeBrowser;
@@ -86,6 +116,10 @@ begin
 
     FContingencia := TContingenciaManager.Create(FSQLite);
     FSincronizador := TSincronizador.Create(FSQLite);
+    FUploadWorker := TUploadWorker.Create(FSQLite.DBPath);
+    // Criados aqui na thread principal (o TSincronizador tem um TTimer)
+    FSQLiteSync := TSQLiteDB.Create(FSQLite.DBPath);
+    FSincronizadorDownload := TSincronizador.Create(FSQLiteSync);
 
     // NFCe Manager (depende do ACBr no DataModule)
     if Assigned(DmApoloWeb) and Assigned(DmApoloWeb.ACBrNFe) then
@@ -96,12 +130,30 @@ begin
     // Monitor de conexao
     FMonitorConexao := TMonitorConexao.Create(FSQLite, FContingencia);
     FMonitorConexao.OnStatusChanged := OnStatusConexaoChanged;
+    FMonitorConexao.OnTestarConexao := TestarConexaoServidor;
+
+    // Retry de pendentes (vendas, doc eletronico e numerario) a cada
+    // INTERVALO_RETRY_SYNC. O timer vive no sincronizador; a conexao e daqui.
+    FSincronizador.OnRetry := DoRetrySync;
 
     // Inicializar Bridge com callbacks
-    FBridge := TApoloBridge.Create(Self, FSQLite);
+    FBridge := TApoloBridge.Create(Self, FSQLite, FContingencia);
     FBridge.OnGerarNFCe := DoGerarNFCe;
+    FBridge.OnCancelarNFCe := DoCancelarNFCe;
+    FBridge.OnReimprimirNFCe := DoReimprimirNFCe;
     FBridge.OnRetransmitir := DoRetransmitir;
+  FBridge.OnRegerarNFCe := DoRegerarNFCe;
+    FBridge.OnUploadVenda := DoUploadVenda;
     FBridge.OnSincronizar := DoSincronizarDados;
+    FBridge.OnForcarSincronizacao := DoForcarSincronizacao;
+    FBridge.OnFecharApp := DoFecharApp;
+    FBridge.OnEnviarParaJS :=
+      procedure(AAction, AData: string)
+      begin
+        EnviarParaJS(AAction, AData);
+      end;
+    // Inicializar TEF se habilitado
+    FBridge.InicializarTEF(DmApoloWeb.TEFConfig, DmApoloWeb.NumCaixa);
 
     // Timer de sincronizacao automatica
     FTimerSync := TTimer.Create(Self);
@@ -109,13 +161,21 @@ begin
     FTimerSync.OnTimer := TimerSyncTimer;
     FTimerSync.Enabled := False; // Ativado apos InicializarSistema
   except
+    // O form nao tem borda: o Caption sozinho e' invisivel e a falha so'
+    // aparecia depois, como Access Violation no primeiro uso do bridge
     on E: Exception do
+    begin
       Caption := 'ApoloWeb - ERRO init: ' + E.Message;
+      SyncLog('INIT: falha ao criar os modulos - [%s] %s', [E.ClassName, E.Message]);
+    end;
   end;
 end;
 
 procedure TFrmMain.FormDestroy(Sender: TObject);
 begin
+  // Restaurar barra de tarefas do Windows
+  ExibirTaskbar;
+
   if Assigned(FTimerSync) then
   begin
     FTimerSync.Enabled := False;
@@ -127,6 +187,23 @@ begin
     FMonitorConexao.Free;
   end;
   FSincronizador.Free;
+  // Com um sync no ar o thread ainda usa os dois: liberar agora seria AV no
+  // fechamento. O processo termina e leva tudo.
+  if not FSincronizando then
+  begin
+    FSincronizadorDownload.Free;
+    FSQLiteSync.Free;
+  end;
+  // Preso numa chamada ao Oracle o thread nao responde ao Terminate; esperar
+  // o timeout de rede aqui travaria o fechamento. Nesse caso fica sem Free - o
+  // processo termina e leva o thread, e o cupom sobe no proximo start.
+  if Assigned(FUploadWorker) then
+  begin
+    if FUploadWorker.Parar(5000) then
+      FUploadWorker.Free
+    else
+      SyncLog('UPLOAD fila: encerrando com envio em andamento (fica pendente)');
+  end;
   FNFCeManager.Free;
   FBridge.Free;
   FContingencia.Free;
@@ -161,8 +238,7 @@ begin
     ShowMessage('WebView2 nao inicializou. Verifique WebView2Loader.dll e WebView2 Runtime.');
 end;
 
-procedure TFrmMain.EdgeBrowserCreateWebViewCompleted(
-  Sender: TCustomEdgeBrowser; AResult: HRESULT);
+procedure TFrmMain.EdgeBrowserCreateWebViewCompleted( Sender: TCustomEdgeBrowser; AResult: HRESULT);
 var
   LWebView3: ICoreWebView2_3;
 begin
@@ -181,7 +257,13 @@ begin
         PChar(PASTA_WEB),
         COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW
       );
-    end;
+    end
+    else
+      // Sem ICoreWebView2_3 o virtual host nao e mapeado e a navegacao para
+      // https://apolo.local falha em tela branca (BuiltInErrorPage desativada).
+      ShowMessage('WebView2 Runtime desatualizado: nao suporta virtual host ' +
+        'mapping (requer Runtime 89+).' + sLineBreak +
+        'Atualize o "Microsoft Edge WebView2 Runtime" nesta maquina.');
 
     // Desabilitar context menu do browser (direito clique)
     EdgeBrowser.DefaultContextMenusEnabled := False;
@@ -215,7 +297,17 @@ begin
     TimerInit.Enabled := True;
   end
   else
+  begin
     Caption := 'ApoloWeb - ERRO na navegacao. Status: ' + IntToStr(WebErrorStatus);
+    // Form sem borda: o Caption e invisivel, entao mostrar o erro de fato.
+    // WebErrorStatus: ver COREWEBVIEW2_WEB_ERROR_STATUS (3=HostNameNotResolved,
+    // tipico de virtual host nao mapeado; 14=ERROR_FILE_NOT_FOUND).
+    ShowMessage('Falha ao carregar o frontend.' + sLineBreak +
+      'URL: ' + LURL + sLineBreak +
+      'WebErrorStatus: ' + IntToStr(WebErrorStatus) + sLineBreak + sLineBreak +
+      'Verifique se ' + PASTA_WEB + 'index.html existe e se o ' +
+      'WebView2 Runtime esta atualizado.');
+  end;
 end;
 
 procedure TFrmMain.TimerInitTimer(Sender: TObject);
@@ -234,6 +326,9 @@ begin
   LJson := TJSONObject.Create;
   try
     LJson.AddPair('versao', VERSAO_SISTEMA);
+    // Versao do binario em uso (VERSIONINFO) - exibida no rodape do login e
+    // no header do PDV para identificar a build instalada na loja.
+    LJson.AddPair('versaoExe', VersaoExecutavel);
     LJson.AddPair('sistema', NOME_SISTEMA);
 
     LEstado := FSQLite.ObterEstado(KEY_ESTADO, '0');
@@ -242,6 +337,10 @@ begin
     LJson.AddPair('codFilial', FSQLite.ObterEstado(KEY_CODFILIAL, ''));
     LJson.AddPair('hdSerial', FSQLite.ObterEstado(KEY_HD_SERIAL, ''));
     LJson.AddPair('operador', FSQLite.ObterEstado(KEY_OPERADOR, ''));
+
+    // TEF
+    LJson.AddPair('tefHabilitado', TJSONBool.Create(FBridge.TEFHabilitado));
+    LJson.AddPair('tefPixQrTela', TJSONBool.Create(FBridge.TEFPixQrNaTela));
 
     // Dados da venda em andamento (recuperacao apos queda)
     LJson.AddPair('cupomAtualId', TJSONNumber.Create(FBridge.CupomAtualId));
@@ -270,6 +369,18 @@ begin
   // Ativar timer de sincronizacao automatica
   if Assigned(FTimerSync) then
     FTimerSync.Enabled := True;
+
+  // Ativar retry de pendentes e ja tentar subir o que ficou para tras
+  ConfigurarUploadWorker;
+  FSincronizador.IniciarRetry;
+  DoRetrySync(nil);
+
+  // Contingencia restaurada de uma sessao anterior: avisar em vez de emitir
+  // offline em silencio. A retransmissao e' disparada pelo operador (F-key /
+  // botao Retransmitir) ou quando o monitor confirmar que voltou online.
+  if FContingencia.EstaEmContingencia then
+    SyncLog('CONTINGENCIA: app iniciou em %s com %d documento(s) pendente(s)',
+      [FContingencia.TipoAtual.ToString, FContingencia.QtdePendentes]);
 
   // Se NFCe nao foi criado no FormCreate (DM nao estava pronto), tentar agora
   if not Assigned(FNFCeManager) and Assigned(DmApoloWeb) and Assigned(DmApoloWeb.ACBrNFe) then
@@ -353,14 +464,24 @@ begin
       // Recarregar configuracao e reconectar
       DmApoloWeb.CarregarConfiguracao;
       DmApoloWeb.ConectarOracle;
+      ConfigurarUploadWorker;
       if DmApoloWeb.ConectadoOracle then
         Caption := NOME_SISTEMA + ' v' + VERSAO_SISTEMA +
           ' | Caixa: ' + IntToStr(DmApoloWeb.NumCaixa) +
           ' | Filial: ' + DmApoloWeb.CodFilial
       else
         Caption := NOME_SISTEMA + ' v' + VERSAO_SISTEMA + ' | OFFLINE';
+      // Reinicializar TEF com nova configuracao
+      FBridge.InicializarTEF(DmApoloWeb.TEFConfig, DmApoloWeb.NumCaixa);
     end;
     Key := 0;
+    Exit;
+  end;
+
+  // Alt+F4 = Fechar aplicacao
+  if (Key = VK_F4) and (ssAlt in Shift) then
+  begin
+    Close;
     Exit;
   end;
 
@@ -388,6 +509,7 @@ procedure TFrmMain.DoGerarNFCe(ACupomId: Integer;
   var AChaveNFe, AProtocolo: string);
 var
   LResultado: TResultadoOperacao;
+  LJson: TJSONObject;
 begin
   if not Assigned(FNFCeManager) then
     raise Exception.Create('Modulo NFCe nao inicializado. Verifique o ACBr.');
@@ -396,18 +518,109 @@ begin
 
   if LResultado.Sucesso then
   begin
-    // Extrair chave e protocolo do resultado
-    AChaveNFe := LResultado.Mensagem;
-    AProtocolo := LResultado.Dados;
+    // Result.Dados vem como JSON:
+    //   {"chaveNFe":"...","protocolo":"..."}      (autorizada)
+    //   {"chaveNFe":"...","contingencia":true}    (guardada p/ retransmitir)
+    // Antes atribuia-se Mensagem/Dados direto, gravando o texto do toast em
+    // cupons.chavenfe e quebrando o upload do XML para a retaguarda.
+    AChaveNFe := '';
+    AProtocolo := '';
+
+    LJson := TJSONObject.ParseJSONValue(LResultado.Dados) as TJSONObject;
+    if Assigned(LJson) then
+    try
+      AChaveNFe := LJson.GetValue<string>('chaveNFe', '');
+      AProtocolo := LJson.GetValue<string>('protocolo', '');
+    finally
+      LJson.Free;
+    end;
+
+    if AChaveNFe = '' then
+      SyncLog('NFCe: cupom %d sem chave no retorno (dados=%s)',
+        [ACupomId, LResultado.Dados]);
+
+    // Upload do XML ao Oracle pela fila (fora do thread da tela). So faz
+    // sentido com protocolo: em contingencia ainda nao existe XML autorizado.
+    if AProtocolo <> '' then
+      FUploadWorker.EnfileirarDocEletronico(ACupomId);
   end
   else
     raise Exception.Create(LResultado.Mensagem);
+end;
+
+procedure TFrmMain.DoRetrySync(Sender: TObject);
+begin
+  // Nao mexer no SQLite com venda aberta (mesma guarda do sync automatico)
+  var LEstado := StrToIntDef(FSQLite.ObterEstado(KEY_ESTADO, '0'), 0);
+  if (LEstado = ESTADO_REGISTRANDO) or (LEstado = ESTADO_PAGAMENTO) then Exit;
+
+  // A fila tem conexao Oracle propria e reconecta sozinha - nao depende da
+  // conexao da tela estar de pe
+  FUploadWorker.EnfileirarPendentes;
+end;
+
+{ Sobe a venda para a retaguarda pela fila, sem segurar o fechamento.
+
+  Era feito aqui mesmo, no thread da tela: com o link do Oracle oscilando o
+  caixa congelava no fim da venda (44 s e 88 s no log de 22/09 da loja) e o
+  Windows oferecia "Fechar o programa". A fila tambem roda UploadCancelamentos
+  logo depois, para o cancelamento chegar na hora. }
+procedure TFrmMain.DoUploadVenda(ACupomId: Integer);
+begin
+  FUploadWorker.EnfileirarVenda(ACupomId);
+end;
+
+{ Passa para a fila os dados da conexao Oracle configurada no DataModule.
+  Chamado no start e depois de reconfigurar a conexao (Ctrl+F12). }
+procedure TFrmMain.ConfigurarUploadWorker;
+begin
+  if not Assigned(FUploadWorker) or not Assigned(DmApoloWeb) then Exit;
+  FUploadWorker.ConfigurarOracle(
+    DmApoloWeb.UniConnOracle.ConnectString,
+    DmApoloWeb.UniConnOracle.SpecificOptions.Text);
+end;
+
+procedure TFrmMain.DoCancelarNFCe(ACupomId: Integer; const AJustificativa: string;
+  var ASucesso: Boolean; var AMensagem: string);
+var
+  LResultado: TResultadoOperacao;
+begin
+  ASucesso := False;
+  if not Assigned(FNFCeManager) then
+  begin
+    AMensagem := 'Modulo NFCe nao inicializado. Verifique o ACBr.';
+    Exit;
+  end;
+
+  LResultado := FNFCeManager.CancelarNFCe(ACupomId, AJustificativa);
+  ASucesso := LResultado.Sucesso;
+  AMensagem := LResultado.Mensagem;
+end;
+
+procedure TFrmMain.DoReimprimirNFCe(const AChaveNFe: string;
+  var ASucesso: Boolean; var AMensagem: string);
+begin
+  ASucesso := False;
+  if not Assigned(FNFCeManager) then
+  begin
+    AMensagem := 'Modulo NFCe nao inicializado. Verifique o ACBr.';
+    Exit;
+  end;
+
+  try
+    FNFCeManager.ImprimirDANFCe(AChaveNFe);
+    ASucesso := True;
+  except
+    on E: Exception do
+      AMensagem := E.Message;
+  end;
 end;
 
 procedure TFrmMain.DoRetransmitir(var AQtdEnviados, AQtdErros: Integer);
 var
   LDocId: Integer;
   LResultado: TResultadoOperacao;
+  LCupomId: Variant;
 begin
   if not Assigned(FNFCeManager) then
     raise Exception.Create('Modulo NFCe nao inicializado.');
@@ -415,17 +628,39 @@ begin
   AQtdEnviados := 0;
   AQtdErros := 0;
 
+  // Pedido explicito do operador: dar nova chance aos que ja estouraram o
+  // limite de tentativas automaticas
+  FContingencia.ReiniciarTentativas;
+
   // Processar todos os documentos pendentes
   LDocId := FContingencia.ObterProximoDocParaEnvio;
   while LDocId > 0 do
   begin
     try
-      // Obter cupom_id do documento
-      LResultado := FNFCeManager.EnviarNFCe(LDocId);
+      // RetransmitirDoc recebe o id do documento e reenvia o XML original
+      // assinado. Antes passava-se LDocId para EnviarNFCe (que espera um
+      // cupom_id) e a nota era regerada a partir do cupom errado.
+      LResultado := FNFCeManager.RetransmitirDoc(LDocId);
       if LResultado.Sucesso then
       begin
         FContingencia.AtualizarStatusDoc(LDocId, scAutorizado, LResultado.Dados);
         Inc(AQtdEnviados);
+
+        // Subir venda (se ainda nao subiu) e o XML recem-autorizado, pela fila
+        LCupomId := FSQLite.ExecutarScalar(
+          'SELECT cupom_id FROM nfce_contingencia WHERE id = ' + IntToStr(LDocId));
+        if not VarIsNull(LCupomId) then
+        begin
+          FUploadWorker.EnfileirarVenda(Integer(LCupomId));
+          FUploadWorker.EnfileirarDocEletronico(Integer(LCupomId));
+        end;
+      end
+      else if LResultado.Dados = 'REJEITADO' then
+      begin
+        // SEFAZ negou: sai da fila de retransmissao (reenviar o mesmo XML so
+        // repete a rejeicao). Fica visivel na tela como REJEITADO.
+        FContingencia.AtualizarStatusDoc(LDocId, scRejeitado, '', LResultado.Mensagem);
+        Inc(AQtdErros);
       end
       else
       begin
@@ -444,6 +679,81 @@ begin
   end;
 end;
 
+{ Regera e transmite os documentos REJEITADOS marcados na tela.
+
+  Nao passa pela fila de retransmissao: aquela reenvia o XML original, e o que
+  esta preso aqui e justamente a nota cujo XML o SEFAZ ja negou pelo conteudo.
+  Cada id vira uma nota nova (mesmo numero, chave nova) e, autorizada, sobe
+  para a retaguarda igual a retransmissao faz. }
+procedure TFrmMain.DoRegerarNFCe(const AIds: TArray<Integer>;
+  var AQtdOk, AQtdErro: Integer; var AMensagem: string);
+var
+  I: Integer;
+  LResultado: TResultadoOperacao;
+  LCupomId: Variant;
+  LFalhas: string;
+begin
+  if not Assigned(FNFCeManager) then
+    raise Exception.Create('Modulo NFCe nao inicializado.');
+
+  AQtdOk := 0;
+  AQtdErro := 0;
+  LFalhas := '';
+
+  for I := 0 to High(AIds) do
+  begin
+    if AIds[I] <= 0 then
+      Continue;
+
+    try
+      LResultado := FNFCeManager.RegerarDoc(AIds[I]);
+    except
+      on E: Exception do
+      begin
+        LResultado.Sucesso := False;
+        LResultado.Mensagem := E.Message;
+        LResultado.Dados := '';
+      end;
+    end;
+
+    if LResultado.Sucesso then
+    begin
+      FContingencia.AtualizarStatusDoc(AIds[I], scAutorizado, LResultado.Dados);
+      Inc(AQtdOk);
+
+      // Mesma subida da retransmissao: venda + XML autorizado, pela fila
+      LCupomId := FSQLite.ExecutarScalar(
+        'SELECT cupom_id FROM nfce_contingencia WHERE id = ' + IntToStr(AIds[I]));
+      if not VarIsNull(LCupomId) then
+      begin
+        FUploadWorker.EnfileirarVenda(Integer(LCupomId));
+        FUploadWorker.EnfileirarDocEletronico(Integer(LCupomId));
+      end;
+    end
+    else
+    begin
+      Inc(AQtdErro);
+      // Rejeicao nova substitui a antiga na tela; erro de comunicacao ou
+      // recusa local (duplicidade, ja autorizada) tambem tem que aparecer
+      FContingencia.AtualizarStatusDoc(AIds[I], scRejeitado, '',
+        LResultado.Mensagem);
+      if LFalhas <> '' then
+        LFalhas := LFalhas + ' | ';
+      LFalhas := LFalhas + 'Doc ' + IntToStr(AIds[I]) + ': ' + LResultado.Mensagem;
+    end;
+  end;
+
+  AMensagem := LFalhas;
+
+  SyncLog('NFCe: regeracao manual - %d autorizada(s), %d com erro',
+    [AQtdOk, AQtdErro]);
+end;
+
+procedure TFrmMain.DoFecharApp(Sender: TObject);
+begin
+  Close;
+end;
+
 procedure TFrmMain.OnStatusConexaoChanged(AOnline: Boolean;
   ATipo: TTipoContingencia);
 var
@@ -459,14 +769,104 @@ begin
     LJson.Free;
   end;
 
-  // Se voltou online, iniciar sincronizacao de pendentes
-  if AOnline and Assigned(DmApoloWeb) and DmApoloWeb.UniConnOracle.Connected then
+  if not AOnline then Exit;
+
+  // Voltou online: primeiro tentar autorizar as NFCe presas em contingencia.
+  // Cada uma que for autorizada libera o XML para subir; quando a fila zera,
+  // o proprio manager sai da contingencia.
+  if FContingencia.EstaEmContingencia and Assigned(FNFCeManager) then
   begin
-    FSincronizador.ProcessarPendentes(DmApoloWeb.UniConnOracle);
+    var LEnviados := 0;
+    var LErros := 0;
+    try
+      DoRetransmitir(LEnviados, LErros);
+      SyncLog('CONTINGENCIA: retransmissao automatica - %d enviado(s), %d erro(s)',
+        [LEnviados, LErros]);
+    except
+      on E: Exception do
+        SyncLog('CONTINGENCIA: retransmissao automatica falhou - [%s] %s',
+          [E.ClassName, E.Message]);
+    end;
+
+    // A saida automatica do manager so' acontece quando uma nota e' AUTORIZADA
+    // e zera a fila. Se o que sobrou for tudo REJEITADO, QtdePendentes ja e' 0
+    // e ninguem autoriza mais nada: o caixa ficava emitindo offline para
+    // sempre por causa de notas que nunca vao ser aceitas.
+    if FContingencia.EstaEmContingencia and (FContingencia.QtdePendentes = 0) then
+    begin
+      FContingencia.SairContingencia;
+      SyncLog('CONTINGENCIA: fila vazia e SEFAZ no ar - caixa voltou a emitir online');
+    end;
   end;
+
+  // Depois subir vendas / doc eletronico / numerario pendentes (pela fila)
+  FUploadWorker.EnfileirarPendentes;
+end;
+
+{ Teste de conectividade do monitor.
+
+  A pergunta que importa e' "da' para emitir NFCe agora?", e quem responde isso
+  e' o StatusServico do webservice da UF - por isso ele vem primeiro. O Oracle
+  entra so' como alternativa, para o monitor nao declarar o caixa offline por
+  causa de um NFCeManager que ainda nao subiu. }
+function TFrmMain.TestarConexaoServidor: Boolean;
+var
+  LEstado: Integer;
+begin
+  // A consulta ao SEFAZ e' sincrona e roda no thread da VCL. Caindo no meio de
+  // uma venda, o caixa congela ate o timeout com o cliente na frente - entao
+  // fora do estado livre devolve o estado atual, sem contar falha nem volta.
+  //
+  // Mas o estado pode ficar preso: venda aberta e abandonada deixa ESTADO=2
+  // gravado indefinidamente (e' o estado do caixa 33 agora), e ai o caixa
+  // nunca mais consultaria a SEFAZ nem sairia da contingencia. Depois de
+  // MAX_PROBES_PULADOS ciclos consulta assim mesmo - a essa altura nao ha
+  // operador digitando, so' uma venda esquecida na tela.
+  LEstado := StrToIntDef(FSQLite.ObterEstado(KEY_ESTADO, '0'), 0);
+  if not ((LEstado = ESTADO_FECHADO) or (LEstado = ESTADO_LIVRE)) then
+  begin
+    Inc(FProbesPulados);
+    if FProbesPulados < MAX_PROBES_PULADOS then
+      Exit(FMonitorConexao.Online);
+  end;
+  FProbesPulados := 0;
+
+  if Assigned(FNFCeManager) then
+    Exit(FNFCeManager.SefazDisponivel);
+
+  Result := Assigned(DmApoloWeb) and DmApoloWeb.UniConnOracle.Connected;
+end;
+
+procedure TFrmMain.OcultarTaskbar;
+var
+  LTaskbar: HWND;
+begin
+  LTaskbar := FindWindow('Shell_TrayWnd', nil);
+  if LTaskbar <> 0 then
+    ShowWindow(LTaskbar, SW_HIDE);
+end;
+
+procedure TFrmMain.ExibirTaskbar;
+var
+  LTaskbar: HWND;
+begin
+  LTaskbar := FindWindow('Shell_TrayWnd', nil);
+  if LTaskbar <> 0 then
+    ShowWindow(LTaskbar, SW_SHOW);
 end;
 
 procedure TFrmMain.DoSincronizarDados;
+begin
+  SincronizarDadosInterno(False);
+end;
+
+procedure TFrmMain.DoForcarSincronizacao;
+begin
+  SyncLog('CARGA GERAL solicitada pelo operador (F5)');
+  SincronizarDadosInterno(True);
+end;
+
+procedure TFrmMain.SincronizarDadosInterno(AForcar: Boolean);
 var
   LConnStr: string;
   LSincronizador: TSincronizador;
@@ -474,11 +874,18 @@ var
 begin
   if FSincronizando then Exit;
 
-  // Nao sincronizar com venda aberta (registrando ou pagamento)
+  // Nao sincronizar com venda aberta (registrando ou pagamento).
+  // Fechado e livre podem sincronizar (login acontece com caixa fechado).
   LEstado := StrToIntDef(FSQLite.ObterEstado(KEY_ESTADO, '0'), 0);
-  if LEstado <> ESTADO_LIVRE then
+  if (LEstado = ESTADO_REGISTRANDO) or (LEstado = ESTADO_PAGAMENTO) then
   begin
     ExecuteJS('if(window.ApoloApp) ApoloApp.hideSyncOverlay()');
+    if AForcar then
+    begin
+      SyncLog('CARGA GERAL bloqueada: KEY_ESTADO=%d (nao livre)', [LEstado]);
+      ExecuteJS('Toast.warning("Carga geral indisponivel com venda em andamento. ' +
+        'Use F12 para cancelar/normalizar a venda")');
+    end;
     Exit;
   end;
 
@@ -499,11 +906,15 @@ begin
   end;
 
   FSincronizando := True;
-  ExecuteJS('if(window.ApoloApp) ApoloApp.showSyncOverlay("Sincronizando dados...", "Atualizando produtos e precos")');
+  if AForcar then
+    ExecuteJS('if(window.ApoloApp) ApoloApp.showSyncOverlay("Carga geral...", "Baixando todos os dados do servidor")')
+  else
+    ExecuteJS('if(window.ApoloApp) ApoloApp.showSyncOverlay("Sincronizando dados...", "Atualizando produtos e precos")');
 
   // Capturar dados na main thread
   LConnStr := DmApoloWeb.UniConnOracle.ConnectString;
-  LSincronizador := FSincronizador;
+  LSincronizador := FSincronizadorDownload;
+  var LSQLiteSync := FSQLiteSync;
 
   TThread.CreateAnonymousThread(
     procedure
@@ -511,17 +922,18 @@ begin
       LConn: TUniConnection;
     begin
       try
+        if not LSQLiteSync.EstaAberto then
+          LSQLiteSync.AbrirBanco;
         LConn := TUniConnection.Create(nil);
         try
           LConn.ConnectString := LConnStr;
           LConn.LoginPrompt := False;
           LConn.Connect;
           try
-            // Verificar se precisa sincronizar (comparar datas no Oracle)
-            if LSincronizador.PrecisaSincronizar(LConn) then
+            if AForcar or LSincronizador.PrecisaSincronizar(LConn) then
             begin
-              LSincronizador.DownloadCompleto(LConn);
-              // Atualizar data_atualizacao_caixa no Oracle
+              // F5/carga geral = recarga full de produtos; senao incremental
+              LSincronizador.DownloadCompleto(LConn, AForcar);
               LSincronizador.AtualizarDataSincCaixa(LConn);
             end;
           finally
@@ -531,14 +943,21 @@ begin
           LConn.Free;
         end;
       except
-        // Falha na sincronizacao nao eh fatal
+        // Falha na sincronizacao nao eh fatal, mas precisa ficar visivel no log
+        on E: Exception do
+          SyncLog('SYNC thread: ERRO %s - %s', [E.ClassName, E.Message]);
       end;
 
       TThread.Queue(nil,
         procedure
         begin
+          // Certificado rebaixado pela carga: reaplica no ACBr
+          if LSincronizador.CertificadoRenovado and Assigned(DmApoloWeb) then
+            DmApoloWeb.RecarregarConfiguracaoNFCe;
           FSincronizando := False;
           ExecuteJS('if(window.ApoloApp) ApoloApp.hideSyncOverlay()');
+          if AForcar then
+            ExecuteJS('Toast.success("Carga geral concluida")');
         end
       );
     end
@@ -553,13 +972,15 @@ begin
   if not DmApoloWeb.ConectadoOracle then Exit;
 
   // Nao sincronizar com venda aberta (registrando ou pagamento)
-  if StrToIntDef(FSQLite.ObterEstado(KEY_ESTADO, '0'), 0) <> ESTADO_LIVRE then Exit;
+  var LEstadoAuto := StrToIntDef(FSQLite.ObterEstado(KEY_ESTADO, '0'), 0);
+  if (LEstadoAuto = ESTADO_REGISTRANDO) or (LEstadoAuto = ESTADO_PAGAMENTO) then Exit;
 
   // Executar sync silenciosamente (sem mostrar overlay)
   FSincronizando := True;
 
   var LConnStr := DmApoloWeb.UniConnOracle.ConnectString;
-  var LSincronizador := FSincronizador;
+  var LSincronizador := FSincronizadorDownload;
+  var LSQLiteSync := FSQLiteSync;
 
   TThread.CreateAnonymousThread(
     procedure
@@ -567,6 +988,8 @@ begin
       LConn: TUniConnection;
     begin
       try
+        if not LSQLiteSync.EstaAberto then
+          LSQLiteSync.AbrirBanco;
         LConn := TUniConnection.Create(nil);
         try
           LConn.ConnectString := LConnStr;
@@ -585,12 +1008,17 @@ begin
           LConn.Free;
         end;
       except
-        // Falha silenciosa na sync automatica
+        // Falha na sync automatica nao eh fatal, mas fica no log
+        on E: Exception do
+          SyncLog('SYNC auto: ERRO %s - %s', [E.ClassName, E.Message]);
       end;
 
       TThread.Queue(nil,
         procedure
         begin
+          // Certificado rebaixado pela carga: reaplica no ACBr
+          if LSincronizador.CertificadoRenovado and Assigned(DmApoloWeb) then
+            DmApoloWeb.RecarregarConfiguracaoNFCe;
           FSincronizando := False;
         end
       );

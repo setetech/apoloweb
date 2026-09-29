@@ -27,6 +27,19 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+/* Logotipo da loja no header: limitado a altura da barra */
+.pos-logo-img {
+  max-height: 32px;
+  max-width: 180px;
+  object-fit: contain;
+  display: block;
+}
+/* Versao colada no logo, sem herdar o gap de 12px do header */
+.pos-header-left .app-version {
+  margin-left: -8px;
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
 .pos-separator {
   color: var(--border-color);
 }
@@ -97,13 +110,23 @@
 .items-table tbody tr:last-child { background: rgba(108, 92, 231, 0.08); }
 .items-table tbody tr.item-cancelled { opacity: 0.35; text-decoration: line-through; }
 .items-table tbody tr.item-offer td:nth-child(3) { color: var(--accent-warning); }
+.items-table tbody tr.item-selected,
+.items-table tbody tr.item-selected:last-child {
+  background: rgba(108, 92, 231, 0.22);
+  box-shadow: inset 3px 0 0 var(--accent-primary);
+}
 
 .col-seq { width: 50px; text-align: center; }
 .col-cod { width: 120px; font-family: var(--font-mono); font-size: 0.9rem; }
 .col-desc { }
+.col-un { width: 50px; text-align: center; font-family: var(--font-mono); font-size: 0.9rem; color: var(--text-muted); }
 .col-qtd { width: 70px; text-align: right; font-family: var(--font-mono); }
 .col-unit { width: 100px; text-align: right; font-family: var(--font-mono); }
+.col-descv { width: 90px; text-align: right; font-family: var(--font-mono); color: var(--accent-danger); }
 .col-total { width: 110px; text-align: right; font-family: var(--font-mono); font-weight: 600; }
+
+/* Item com desconto: total liquido em destaque */
+.items-table tbody tr.item-discounted .col-total { color: var(--accent-success); }
 
 /* Ultimo item destaque */
 .last-item {
@@ -221,7 +244,7 @@
   margin: 0;
 }
 .vendedor-row input {
-  width: 80px;
+  width: 100px;
   padding: 4px 8px;
   font-size: 0.85rem;
   font-family: var(--font-mono);
@@ -360,6 +383,20 @@
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
   font-size: 0.9rem;
+}
+.pay-list-item .pay-list-desc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pay-list-item .pay-list-cod {
+  color: var(--text-muted);
+  font-size: 0.85em;
 }
 .pay-list-item .pay-list-remove {
   color: var(--accent-danger);
@@ -505,4 +542,200 @@
 .contingencia-status {
   text-align: center;
   padding: 12px;
+}
+
+/* ===== LOGOTIPO DA LOJA (DANFCe / PDF) ===== */
+.logo-config {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.logo-preview-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  /* Xadrez leve: revela transparencia do PNG */
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.04) 75%),
+    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.04) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.logo-preview-box img {
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+}
+.logo-vazio {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+.logo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.logo-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.logo-info {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* Formularios de parametros (abas TEF e Impressora) */
+.cfg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 620px;
+}
+.cfg-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.cfg-check input { width: 16px; height: 16px; cursor: pointer; }
+.cfg-status {
+  min-height: 20px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+.cfg-status-erro {
+  color: var(--accent-danger);
+  border-color: var(--accent-danger);
+}
+
+/* Blocos dentro de uma aba de configuracao
+   (TEF administrativo, cancelamento de NFCe) */
+.cfg-sep {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 20px 0 4px 0;
+}
+.cfg-titulo {
+  margin: 14px 0 4px 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cfg-nota {
+  margin: 0 0 12px 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.cfg-nota b { color: var(--accent-warning); }
+
+/* Aviso operacional dentro de uma aba de configuracao */
+.cfg-aviso {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent-danger);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.cfg-aviso b { color: var(--accent-danger); }
+
+/* Coluna de botoes de acao nas tabelas de documentos/transacoes */
+.data-table .col-acao {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Configuracao do protetor de tela */
+.ss-config {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+.ss-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.ss-check input { width: 16px; height: 16px; cursor: pointer; }
+.ss-timeout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.ss-timeout input {
+  width: 80px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.ss-timeout input:disabled { opacity: 0.45; }
+
+/* ===== PROTETOR DE TELA (logotipo flutuante) ===== */
+.screensaver {
+  position: fixed;
+  inset: 0;
+  z-index: 900;            /* abaixo dos modais (1000) */
+  background: var(--bg-primary);
+  overflow: hidden;
+  cursor: none;
+}
+.screensaver-box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  will-change: transform;  /* anima na GPU: nao rouba CPU do caixa */
+}
+.screensaver-box img {
+  max-width: 320px;
+  max-height: 200px;
+  object-fit: contain;
+}
+.screensaver-texto {
+  font-size: 2.6rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-info));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.screensaver-hint {
+  position: absolute;
+  bottom: 28px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.03em;
+}
+@media (max-width: 720px) {
+  .logo-config { grid-template-columns: 1fr; }
 }

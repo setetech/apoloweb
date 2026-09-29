@@ -57,9 +57,11 @@ const Products = {
       if (emOferta) tr.classList.add('offer');
 
       tr.innerHTML = `
+        <td style="font-family: var(--font-mono);">${prod.codprod}</td>
         <td>${prod.codbarra || ''}</td>
         <td>${prod.descricao}</td>
         <td>${prod.unidade || ''}</td>
+        <td style="text-align:right; font-family: var(--font-mono);">${Utils.formatMoney(prod.qtunit || 1)}</td>
         <td>${prod.embalagem || ''}</td>
         <td style="text-align:right; font-family: var(--font-mono);">${Utils.formatMoney(prod.pvenda)}</td>
         <td style="text-align:right; font-family: var(--font-mono);">${Utils.formatMoney(prod.pvendaatac)}</td>
@@ -103,9 +105,13 @@ const Products = {
     const prod = this._results[this._selectedIndex];
     this.close();
 
-    // Adicionar ao PDV
+    // Adicionar ao PDV. O codbarra identifica a embalagem, mas produtos sem
+    // EAN vem com "0" - nesse caso "0" casaria com qualquer outro produto sem
+    // barcode no Delphi, entao usa o codprod
+    const codbarra = String(prod.codbarra || '').trim();
+    const codigo = (codbarra && !/^0+$/.test(codbarra)) ? codbarra : String(prod.codprod);
     const barcodeInput = document.getElementById('barcode-input');
-    barcodeInput.value = prod.codbarra || prod.codprod;
-    POS.processarCodigo(barcodeInput.value);
+    barcodeInput.value = codigo;
+    POS.processarCodigo(codigo);
   }
 };

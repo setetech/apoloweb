@@ -8,6 +8,14 @@
   <link rel="stylesheet" href="css/pos.css">
   <link rel="stylesheet" href="css/dialogs.css">
   <link rel="stylesheet" href="css/animations.css">
+  <link rel="stylesheet" href="css/themes.css">
+  <script>
+    // Aplicar tema salvo ANTES do primeiro paint (evita piscar o tema default)
+    (function() {
+      var t = localStorage.getItem('apolo_tema');
+      if (t && t !== 'escuro') document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
 </head>
 <body>
   <!-- ===== TELA DE LOGIN ===== -->
@@ -33,6 +41,8 @@
         <button type="submit" class="btn btn-primary btn-lg" id="btn-login">Entrar</button>
         <p id="login-error" class="error-msg hidden"></p>
       </form>
+      <!-- Versao do executavel: discreta, mas sempre visivel no login -->
+      <span class="app-version" id="login-versao"></span>
     </div>
   </div>
 
@@ -61,7 +71,11 @@
     <!-- Header -->
     <header class="pos-header">
       <div class="pos-header-left">
-        <span class="pos-logo">ApoloWeb</span>
+        <!-- Logotipo da loja; cai no nome do sistema quando nao ha logo -->
+        <img id="pos-logo-img" class="pos-logo-img hidden" alt="Logotipo da loja">
+        <span class="pos-logo" id="pos-logo-texto">ApoloWeb</span>
+        <!-- Versao do executavel ao lado do logo (discreta) -->
+        <span class="app-version" id="pos-versao" title="Versao do executavel"></span>
         <span class="pos-separator">|</span>
         <span class="pos-info" id="pos-caixa">Caixa: ---</span>
       </div>
@@ -74,6 +88,7 @@
         <span class="pos-info" id="pos-operador">Operador: ---</span>
         <span class="pos-separator">|</span>
         <span class="pos-clock" id="pos-clock">00:00</span>
+        <button id="btn-tema" class="btn-tema" title="Trocar tema" tabindex="-1">&#127912;</button>
       </div>
     </header>
 
@@ -92,8 +107,10 @@
                 <th class="col-seq">#</th>
                 <th class="col-cod">Codigo</th>
                 <th class="col-desc">Descricao</th>
+                <th class="col-un">Un</th>
                 <th class="col-qtd">Qtde</th>
                 <th class="col-unit">Vl.Unit</th>
+                <th class="col-descv">Desc.</th>
                 <th class="col-total">Total</th>
               </tr>
             </thead>
@@ -136,7 +153,7 @@
         <div class="barcode-input-card">
           <label for="barcode-input">Codigo de Barras / Produto <small style="color:var(--text-secondary); font-weight:400;">(Qtd * Codigo)</small></label>
           <div class="barcode-input-wrapper">
-            <input type="text" id="barcode-input" placeholder="Leia ou digite o codigo" autofocus>
+            <input type="text" id="barcode-input" placeholder="Codigo ou descricao" autofocus>
             <button class="btn btn-icon" id="btn-search-product" title="Buscar produto (F1)">
               <svg viewBox="0 0 24 24" width="20" height="20">
                 <path fill="currentColor" d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
@@ -180,7 +197,9 @@
         <button class="fkey" data-key="F1"><span class="fkey-label">F1</span><span class="fkey-text">Produto</span></button>
         <button class="fkey" data-key="F2"><span class="fkey-label">F2</span><span class="fkey-text">Cliente</span></button>
         <button class="fkey" data-key="F3"><span class="fkey-label">F3</span><span class="fkey-text">Desconto</span></button>
+        <button class="fkey" data-key="Shift+F3" title="Desconto no item (Shift+F3)"><span class="fkey-label">&#8679;F3</span><span class="fkey-text">Desc.Item</span></button>
         <button class="fkey" data-key="F4"><span class="fkey-label">F4</span><span class="fkey-text">Pagamento</span></button>
+        <button class="fkey" data-key="F5"><span class="fkey-label">F5</span><span class="fkey-text">Carga Geral</span></button>
         <button class="fkey" data-key="F6"><span class="fkey-label">F6</span><span class="fkey-text">Cancelar Item</span></button>
         <button class="fkey" data-key="F7"><span class="fkey-label">F7</span><span class="fkey-text">Pre-Venda</span></button>
         <button class="fkey" data-key="F8"><span class="fkey-label">F8</span><span class="fkey-text">Sangria</span></button>
@@ -190,6 +209,15 @@
         <button class="fkey fkey-danger" data-key="F12"><span class="fkey-label">F12</span><span class="fkey-text">Cancelar Venda</span></button>
       </div>
     </footer>
+
+    <!-- Protetor de tela: logotipo flutuante com o caixa parado -->
+    <div id="screensaver" class="screensaver hidden">
+      <div class="screensaver-box" id="screensaver-box">
+        <img id="screensaver-logo" class="hidden" alt="Logotipo da loja">
+        <span id="screensaver-texto" class="screensaver-texto">ApoloWeb</span>
+      </div>
+      <span class="screensaver-hint">Pressione qualquer tecla para voltar ao caixa</span>
+    </div>
   </div>
 
   <!-- ===== MODAL PAGAMENTO ===== -->
@@ -206,9 +234,11 @@
           <button class="pay-tab" data-tab="pay-cheque">F2 Cheque</button>
           <button class="pay-tab" data-tab="pay-cartao">F3 Cartao</button>
           <button class="pay-tab" data-tab="pay-pix">F4 PIX</button>
+          <button class="pay-tab" data-tab="pay-tef" style="display:none">F3 TEF</button>
           <button class="pay-tab" data-tab="pay-cobranca">F5 Cobranca</button>
           <button class="pay-tab" data-tab="pay-pos">F6 POS</button>
         </div>
+        <p id="pay-hint-tef" class="pay-hint" style="display:none">Atalho: <b>F9</b> TEF Credito &middot; <b>F10</b> TEF Debito &middot; <b>F11</b> TEF PIX &mdash; ja com o valor restante</p>
 
         <!-- Conteudo das tabs -->
         <div class="pay-tab-content">
@@ -223,11 +253,11 @@
           <!-- Cheque -->
           <div id="pay-cheque" class="pay-panel">
             <div class="pay-grid-2col">
-              <div class="input-group"><label>Valor (R$)</label><input type="text" id="pay-cheque-valor" class="input-currency"></div>
-              <div class="input-group"><label>Banco</label><input type="text" id="pay-cheque-banco"></div>
-              <div class="input-group"><label>Agencia</label><input type="text" id="pay-cheque-agencia"></div>
-              <div class="input-group"><label>Conta</label><input type="text" id="pay-cheque-conta"></div>
-              <div class="input-group"><label>Num. Cheque</label><input type="text" id="pay-cheque-num"></div>
+              <div class="input-group"><label>Valor (R$) <span class="req">*</span></label><input type="text" id="pay-cheque-valor" class="input-currency"></div>
+              <div class="input-group"><label>Banco <span class="req">*</span></label><input type="text" id="pay-cheque-banco"></div>
+              <div class="input-group"><label>Agencia <span class="req">*</span></label><input type="text" id="pay-cheque-agencia"></div>
+              <div class="input-group"><label>Conta <span class="req">*</span></label><input type="text" id="pay-cheque-conta"></div>
+              <div class="input-group"><label>Num. Cheque <span class="req">*</span></label><input type="text" id="pay-cheque-num"></div>
               <div class="input-group"><label>CPF/CNPJ</label><input type="text" id="pay-cheque-cpf"></div>
               <div class="input-group"><label>CMC7</label><input type="text" id="pay-cheque-cmc7"></div>
               <div class="input-group"><label>Dt. Pre-datado</label><input type="date" id="pay-cheque-dt"></div>
@@ -264,13 +294,47 @@
             </div>
           </div>
 
+          <!-- TEF -->
+          <div id="pay-tef" class="pay-panel">
+            <div class="pay-grid-2col">
+              <div class="input-group">
+                <label>Valor (R$)</label>
+                <input type="text" id="pay-tef-valor" class="input-currency input-lg" placeholder="0,00">
+              </div>
+              <div class="input-group">
+                <label>Tipo</label>
+                <select id="pay-tef-tipo">
+                  <option value="credito">Credito</option>
+                  <option value="debito">Debito</option>
+                  <option value="pix">PIX</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label>Parcelas</label>
+                <input type="number" id="pay-tef-parcelas" value="1" min="1" max="24">
+              </div>
+            </div>
+            <div id="tef-aguardando" class="tef-loading hidden">
+              <div class="tef-loading-spinner"></div>
+              <p id="tef-aguardando-titulo">Aguardando resposta do TEF...</p>
+              <!-- Trocado por Payment._textoAguardandoTEF: num PIX o cliente
+                   nao passa cartao, le o QR no visor do pinpad -->
+              <p class="tef-loading-sub" id="tef-aguardando-sub">Insira ou aproxime o cartao na maquininha</p>
+              <button class="btn btn-danger tef-loading-cancel" id="btn-tef-cancelar" type="button">Esc Cancelar TEF</button>
+            </div>
+          </div>
+
           <!-- Cobranca -->
           <div id="pay-cobranca" class="pay-panel">
             <div class="pay-grid-2col">
-              <div class="input-group"><label>Valor (R$)</label><input type="text" id="pay-cobranca-valor" class="input-currency"></div>
+              <div class="input-group"><label>Meio de Pagamento <span class="req">*</span></label><select id="pay-cobranca-meio"></select></div>
+              <div class="input-group"><label>Valor (R$) <span class="req">*</span></label><input type="text" id="pay-cobranca-valor" class="input-currency"></div>
               <div class="input-group"><label>Plano Pagto</label><select id="pay-cobranca-plano"></select></div>
-              <div class="input-group"><label>Vencimento</label><input type="date" id="pay-cobranca-venc"></div>
+              <div class="input-group" id="grp-cobranca-venc"><label>Vencimento</label><input type="date" id="pay-cobranca-venc"></div>
+              <div class="input-group"><label>N. Documento</label><input type="text" id="pay-cobranca-doc"></div>
             </div>
+            <!-- Vencimentos por parcela (gerado conforme prazos do plano) -->
+            <div id="pay-cobranca-parcelas" class="pay-grid-2col"></div>
           </div>
 
           <!-- POS -->
@@ -305,6 +369,53 @@
     </div>
   </div>
 
+  <!-- ===== MODAL QR CODE PIX ===== -->
+  <div id="modal-pix-qr" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Pagamento PIX</h2>
+        <button class="btn-close" data-close-modal="modal-pix-qr">&times;</button>
+      </div>
+      <div class="modal-body pix-qr-body">
+        <div id="pix-qr-code" class="pix-qr-code"></div>
+        <div id="pix-qr-valor" class="pix-qr-valor">R$ 0,00</div>
+        <div id="pix-qr-status" class="pix-qr-status hidden"></div>
+        <div id="pix-qr-chave" class="pix-qr-chave"></div>
+        <p class="pix-qr-hint">Aponte a camera do celular para o QR Code. Confirme somente apos o recebimento.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-pix-qr-cancel">ESC Cancelar</button>
+        <button class="btn btn-primary" id="btn-pix-qr-print">F7 Imprimir</button>
+        <button class="btn btn-success" id="btn-pix-qr-ok">Enter Confirmar Recebimento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL QR CODE PIX PELO TEF =====
+       Usado so com [TEF] pix_qr=tela. Nao tem botao de confirmar: quem aprova
+       o pagamento e a adquirente, e o modal fecha sozinho no tefResultado.
+       data-esc-bloqueado impede que o ESC feche a tela com a transacao no ar. -->
+  <div id="modal-tef-pix-qr" class="modal hidden" data-esc-bloqueado="1">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>PIX pelo TEF</h2>
+      </div>
+      <div class="modal-body pix-qr-body">
+        <div id="tef-pix-qr-code" class="pix-qr-code"></div>
+        <div id="tef-pix-qr-valor" class="pix-qr-valor">R$ 0,00</div>
+        <div class="pix-qr-status">Aguardando a confirmacao da adquirente...</div>
+        <p class="pix-qr-hint">
+          Aponte a camera do celular para o QR Code. A baixa e automatica -
+          para desistir, use Cancelar (Esc).
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="btn-tef-pix-qr-cancelar">Esc Cancelar</button>
+        <button class="btn btn-primary" id="btn-tef-pix-qr-print">F7 Imprimir</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== MODAL BUSCA PRODUTO ===== -->
   <div id="modal-produtos" class="modal hidden">
     <div class="modal-content modal-lg">
@@ -320,9 +431,11 @@
           <table class="data-table">
             <thead>
               <tr>
+                <th>Codigo</th>
                 <th>Cod.Barra</th>
                 <th>Descricao</th>
                 <th>Unidade</th>
+                <th>Qt.Unit</th>
                 <th>Embalagem</th>
                 <th>Preco</th>
                 <th>Preco Atac.</th>
@@ -407,6 +520,23 @@
     </div>
   </div>
 
+  <!-- ===== MODAL PREVIEW COMPROVANTE (sangria/suprimento) ===== -->
+  <div id="modal-comprovante" class="modal hidden">
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h2 id="comprovante-title">Comprovante</h2>
+      </div>
+      <div class="modal-body">
+        <pre id="comprovante-preview" class="comprovante-preview"></pre>
+        <p class="comprovante-hint">Serao impressas 2 vias (caixa e cofre)</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-comprovante-fechar">Fechar (ESC)</button>
+        <button class="btn btn-primary" id="btn-comprovante-imprimir">Imprimir</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== MODAL NFCe ===== -->
   <div id="modal-nfce" class="modal hidden">
     <div class="modal-content modal-lg">
@@ -417,12 +547,17 @@
       <div class="modal-body">
         <div class="nfce-tabs">
           <button class="pay-tab active" data-tab="nfce-pendentes">Pendentes</button>
+          <button class="pay-tab" data-tab="nfce-cancelamento">Notas do Dia</button>
           <button class="pay-tab" data-tab="nfce-contingencia">Contingencia</button>
+          <button class="pay-tab" data-tab="nfce-logo">Logotipo</button>
+          <button class="pay-tab" data-tab="nfce-tef">TEF</button>
+          <button class="pay-tab" data-tab="nfce-impressora">Impressora</button>
         </div>
         <div id="nfce-pendentes" class="pay-panel active">
           <table class="data-table">
             <thead>
               <tr>
+                <th class="col-sel"><input type="checkbox" id="nfce-sel-todos" title="Marcar todos os rejeitados"></th>
                 <th>Chave</th>
                 <th>Num.Nota</th>
                 <th>Cupom</th>
@@ -434,6 +569,38 @@
             </thead>
             <tbody id="nfce-pendentes-tbody"></tbody>
           </table>
+          <div class="btn-group" style="margin-top:1rem;">
+            <button class="btn btn-primary" id="btn-retransmitir-pend">Retransmitir Pendentes</button>
+            <button class="btn btn-warning" id="btn-regerar-pend" disabled>Regerar Selecionadas</button>
+            <button class="btn btn-danger" id="btn-descartar-pend" disabled>Descartar Selecionados</button>
+            <button class="btn" id="btn-atualizar-pend">Atualizar</button>
+          </div>
+        </div>
+        <div id="nfce-cancelamento" class="pay-panel">
+          <p class="cfg-nota">
+            NFCe autorizadas hoje. <b>Reimprimir</b> gera a 2a via do DANFCe na
+            impressora do cupom, a qualquer momento. <b>Cancelar</b> (evento
+            110111) so e homologado pela SEFAZ dentro de <b>30 minutos</b> da
+            autorizacao; o cancelamento estorna tambem o cartao da venda e
+            avisa a retaguarda.
+          </p>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Hora</th>
+                <th>Num.Nota</th>
+                <th>Cupom</th>
+                <th>Valor</th>
+                <th>Chave</th>
+                <th>Prazo</th>
+                <th class="col-acao"></th>
+              </tr>
+            </thead>
+            <tbody id="nfce-cancel-tbody"></tbody>
+          </table>
+          <div class="btn-group" style="margin-top:1rem;">
+            <button class="btn" id="btn-cancel-atualizar">Atualizar</button>
+          </div>
         </div>
         <div id="nfce-contingencia" class="pay-panel">
           <div class="contingencia-info">
@@ -457,6 +624,215 @@
               <button class="btn btn-warning" id="btn-entrar-contingencia">Entrar em Contingencia</button>
               <button class="btn btn-success" id="btn-sair-contingencia">Sair da Contingencia</button>
               <button class="btn btn-primary" id="btn-retransmitir">Retransmitir Pendentes</button>
+            </div>
+          </div>
+        </div>
+        <div id="nfce-logo" class="pay-panel">
+          <div class="logo-config">
+            <div class="logo-preview-box">
+              <img id="logo-preview" alt="Logotipo da loja" class="hidden">
+              <span id="logo-vazio" class="logo-vazio">Nenhum logotipo configurado</span>
+            </div>
+            <div class="logo-form">
+              <div class="input-group">
+                <label for="logo-arquivo">Imagem do logotipo</label>
+                <input type="file" id="logo-arquivo" accept="image/png,image/jpeg,image/gif,image/webp">
+                <small class="logo-hint">
+                  Qualquer imagem serve: e convertida para PNG e reduzida para no
+                  maximo 400px de largura. O logotipo aparece no topo do DANFCe
+                  gerado em PDF.
+                </small>
+              </div>
+              <div class="logo-info" id="logo-info"></div>
+              <div class="btn-group">
+                <button class="btn btn-primary" id="btn-logo-salvar" disabled>Salvar Logotipo</button>
+                <button class="btn btn-danger" id="btn-logo-remover">Remover</button>
+              </div>
+
+              <div class="ss-config">
+                <label class="ss-check">
+                  <input type="checkbox" id="ss-ativo">
+                  <span>Protetor de tela: logotipo flutuando com o caixa parado</span>
+                </label>
+                <div class="ss-timeout">
+                  <label for="ss-segundos">Iniciar apos</label>
+                  <input type="number" id="ss-segundos" min="5" max="3600" step="5" value="30">
+                  <span>segundos de inatividade</span>
+                </div>
+                <small class="logo-hint">
+                  So aparece com o caixa livre, antes de iniciar a venda. Qualquer
+                  tecla, clique ou movimento do mouse volta ao PDV. A preferencia
+                  vale para este caixa.
+                </small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="nfce-tef" class="pay-panel">
+          <div class="cfg-form">
+            <label class="cfg-check">
+              <input type="checkbox" id="tef-habilitado">
+              <span>TEF habilitado neste caixa</span>
+            </label>
+
+            <div class="input-group">
+              <label for="tef-modo">Modo de integracao</label>
+              <select id="tef-modo">
+                <option value="http">HTTP - API TefGpAPI (porta 8000)</option>
+                <option value="arquivo">Arquivo - intercambio direto com o Tef_Dial</option>
+              </select>
+            </div>
+
+            <div class="input-group tef-so-http">
+              <label for="tef-url">URL da API TEF</label>
+              <input type="text" id="tef-url" placeholder="http://127.0.0.1:8000/api">
+              <small class="logo-hint">
+                Exige o TefGpAPI.exe em execucao. Se ele estiver fora do ar o
+                pinpad nunca e acionado.
+              </small>
+            </div>
+
+            <div class="input-group tef-so-arquivo">
+              <label for="tef-pasta-req">Pasta de requisicao</label>
+              <input type="text" id="tef-pasta-req" placeholder="C:\Tef_Dial\Req\">
+            </div>
+            <div class="input-group tef-so-arquivo">
+              <label for="tef-pasta-resp">Pasta de resposta</label>
+              <input type="text" id="tef-pasta-resp" placeholder="C:\Tef_Dial\Resp\">
+              <small class="logo-hint">
+                O PDV grava intpos.001 na pasta de requisicao e le a resposta na
+                outra. Dispensa a API HTTP, mas exige o gerenciador Tef_Dial no ar.
+              </small>
+            </div>
+
+            <div class="input-group">
+              <label for="tef-timeout">Tempo de espera pela resposta (segundos)</label>
+              <input type="number" id="tef-timeout" min="10" max="600" step="10" value="120">
+            </div>
+
+            <div class="input-group">
+              <label for="tef-pix-qr">QR Code do PIX</label>
+              <select id="tef-pix-qr">
+                <option value="pinpad">Pinpad - a adquirente mostra o QR no visor</option>
+                <option value="tela">Tela - o PDV exibe o QR devolvido pelo gerenciador</option>
+              </select>
+              <small class="logo-hint">
+                Quem gera o QR de um PIX pelo TEF e a adquirente, nao o PDV. Use
+                "Tela" apenas se o seu gerenciador devolver o BR Code durante a
+                transacao; caso contrario o QR so aparece no pinpad.
+              </small>
+            </div>
+
+            <div class="input-group tef-so-qr-tela">
+              <label for="tef-pix-qr-campos">Campos do BR Code (modo arquivo)</label>
+              <input type="text" id="tef-pix-qr-campos" placeholder="auto">
+            </div>
+            <div class="input-group tef-so-qr-tela">
+              <label for="tef-pix-qr-chaves">Chaves do BR Code (modo HTTP)</label>
+              <input type="text" id="tef-pix-qr-chaves" placeholder="auto">
+              <small class="logo-hint">
+                "auto" reconhece o BR Code pelo formato (comeca em 000201) e
+                dispensa saber o campo. Para fixar, informe uma lista separada
+                por virgula: 950,133 nos campos ou qrCode,emv nas chaves.
+              </small>
+            </div>
+
+            <label class="cfg-check">
+              <input type="checkbox" id="tef-debug">
+              <span>Gravar log de diagnostico (C:\Apolo\logs\tef-AAAAMMDD.log)</span>
+            </label>
+
+            <div class="cfg-status" id="tef-status"></div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary" id="btn-tef-salvar">Salvar</button>
+              <button class="btn" id="btn-tef-testar">Testar Conexao</button>
+              <button class="btn" id="btn-tef-recarregar">Descartar Alteracoes</button>
+            </div>
+
+            <hr class="cfg-sep">
+
+            <h3 class="cfg-titulo">Administrativo</h3>
+            <p class="cfg-nota">
+              O menu administrativo e desenhado pelo proprio gerenciador
+              (reimpressao, relatorios, testes de comunicacao, funcoes da
+              adquirente). Enquanto ele estiver aberto o caixa fica aguardando.
+            </p>
+            <p class="cfg-nota cfg-aviso">
+              <b>Nao use o menu para vender nem para estornar.</b> Transacao
+              iniciada dentro dele nao passa pelo caixa: nao vira pagamento, nao
+              entra na lista abaixo e nao gera cupom &mdash; se for aprovada, o
+              valor e cobrado do cliente sem documento fiscal. Para desfazer uma
+              venda, use o botao <b>Estornar</b> na linha dela, que manda o
+              cancelamento com o numero de controle correto.
+            </p>
+            <div class="btn-group">
+              <button class="btn btn-primary" id="btn-tef-adm">Menu Administrativo</button>
+              <button class="btn" id="btn-tef-status">Status do Pinpad</button>
+            </div>
+            <div class="cfg-status" id="tef-adm-status"></div>
+
+            <h3 class="cfg-titulo">Transacoes de hoje</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Hora</th>
+                  <th>Cupom</th>
+                  <th>Tipo</th>
+                  <th>Bandeira</th>
+                  <th>NSU</th>
+                  <th>Valor</th>
+                  <th>Status</th>
+                  <th class="col-acao"></th>
+                </tr>
+              </thead>
+              <tbody id="tef-transacoes-tbody"></tbody>
+            </table>
+            <div class="btn-group">
+              <button class="btn" id="btn-tef-transacoes">Atualizar Transacoes</button>
+            </div>
+          </div>
+        </div>
+        <div id="nfce-impressora" class="pay-panel">
+          <div class="cfg-form">
+            <div class="input-group">
+              <label for="imp-modo">Modo de impressao do cupom</label>
+              <select id="imp-modo">
+                <option value="SUMATRA">SUMATRA - gera PDF e imprime pelo SumatraPDF</option>
+                <option value="ESCPOS">ESCPOS - direto na termica, sem PDF</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="imp-impressora">Impressora do Windows</label>
+              <select id="imp-impressora"></select>
+              <small class="logo-hint" id="imp-impressora-hint"></small>
+            </div>
+
+            <div class="input-group imp-so-escpos">
+              <label for="imp-escpos-modelo">Modelo ESC/POS</label>
+              <select id="imp-escpos-modelo"></select>
+            </div>
+            <div class="input-group imp-so-escpos">
+              <label for="imp-escpos-porta">Porta</label>
+              <input type="text" id="imp-escpos-porta" placeholder="vazio = RAW:impressora acima">
+              <small class="logo-hint">
+                Exemplos: COM3 | TCP:192.168.0.50:9100 | RAW:NomeDaImpressora.
+                Em branco, usa o spooler do Windows na impressora escolhida acima.
+              </small>
+            </div>
+            <div class="input-group imp-so-escpos">
+              <label for="imp-escpos-colunas">Colunas da fonte normal</label>
+              <input type="number" id="imp-escpos-colunas" min="24" max="80" step="1" value="48">
+              <small class="logo-hint">48 para bobina de 80mm, 32 para 58mm.</small>
+            </div>
+
+            <div class="cfg-status" id="imp-status"></div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary" id="btn-imp-salvar">Salvar</button>
+              <button class="btn" id="btn-imp-testar">Imprimir Teste</button>
+              <button class="btn" id="btn-imp-recarregar">Descartar Alteracoes</button>
             </div>
           </div>
         </div>
@@ -487,6 +863,21 @@
     </div>
   </div>
 
+  <!-- ===== MODAL TEMAS ===== -->
+  <div id="modal-temas" class="modal hidden">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h2>Tema do PDV</h2>
+      </div>
+      <div class="modal-body">
+        <div id="temas-grid" class="theme-grid"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-temas-fechar">Fechar (ESC)</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== OVERLAY SINCRONIZACAO ===== -->
   <div id="sync-overlay" class="sync-overlay hidden">
     <div class="sync-content">
@@ -506,11 +897,14 @@
   <script src="js/utils.js"></script>
   <script src="js/bridge.js"></script>
   <script src="js/keyboard.js"></script>
+  <script src="js/themes.js"></script>
   <script src="js/pos.js"></script>
   <script src="js/products.js"></script>
   <script src="js/customers.js"></script>
+  <script src="js/qrcode.js"></script>
   <script src="js/payment.js"></script>
   <script src="js/nfce.js"></script>
+  <script src="js/screensaver.js"></script>
   <script src="js/reports.js"></script>
   <script src="js/app.js"></script>
 </body>

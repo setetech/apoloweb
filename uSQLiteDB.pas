@@ -19,6 +19,9 @@ type
     procedure InserirDadosTeste;
     function ObterVersaoSchema: Integer;
     procedure AtualizarVersaoSchema(AVersao: Integer);
+    procedure CriarTabelaTribIBSCBS;
+    procedure CriarTabelaPixCDConfig;
+    procedure RepararChavesNFCe;
     function Ofuscar(const ATexto, AChave: string): string;
   public
     constructor Create(const ADBPath: string);
@@ -35,6 +38,12 @@ type
     function ExecutarSelect(const ASQL: string; const AParams: array of Variant): TUniQuery; overload;
     function ExecutarScalar(const ASQL: string): Variant;
 
+    // Comando preparado para insercao em massa: prepara o SQL UMA vez e
+    // reexecuta so trocando os parametros (ExecutarSQL cria/parseia/prepara
+    // uma TUniQuery nova a cada chamada - inviavel dentro de loop de sync).
+    function CriarComando(const ASQL: string): TUniQuery;
+    procedure ExecutarComando(AComando: TUniQuery; const AParams: array of Variant);
+
     // Estado do caixa (substitui TinyDB)
     procedure SalvarEstado(const AChave, AValor: string);
     function ObterEstado(const AChave: string; const ADefault: string = ''): string;
@@ -44,12 +53,12 @@ type
   end;
 
 const
-  SCHEMA_VERSION = 6;
+  SCHEMA_VERSION = 24;
 
 implementation
 
 uses
-  System.Variants, uConstantesWeb;
+  System.Variants, uConstantesWeb, uSyncLog;
 
 { TSQLiteDB }
 
@@ -64,6 +73,8 @@ begin
   FConnection.SpecificOptions.Values['Direct'] := 'True';
   FConnection.SpecificOptions.Values['DateFormat'] := 'yyyy-mm-dd';
   FConnection.SpecificOptions.Values['EnableSharedCache'] := 'False';
+  // Sem BusyTimeout qualquer lock momentaneo vira "database is locked"
+  FConnection.SpecificOptions.Values['BusyTimeout'] := '8000';
   FConnection.LoginPrompt := False;
 end;
 
@@ -85,6 +96,7 @@ begin
   AbrirBanco;
 
   // Configuracoes de performance do SQLite
+  ExecutarSQL('PRAGMA busy_timeout=8000');
   ExecutarSQL('PRAGMA journal_mode=WAL');
   ExecutarSQL('PRAGMA synchronous=NORMAL');
   ExecutarSQL('PRAGMA foreign_keys=ON');
@@ -97,6 +109,232 @@ begin
     'valor TEXT, ' +
     'dt_atualizacao TEXT)'
   );
+
+  // Migracao incremental v6 -> v7: adicionar coluna doceletronico_enviado
+  if ObterVersaoSchema = 6 then
+  begin
+    try
+      ExecutarSQL('ALTER TABLE cupons ADD COLUMN doceletronico_enviado INTEGER DEFAULT 0');
+    except
+      // Coluna pode ja existir
+    end;
+    AtualizarVersaoSchema(7);
+  end;
+
+  // Migracao incremental v7 -> v8: tabela tef_pendentes
+  if ObterVersaoSchema = 7 then
+  begin
+    ExecutarSQL(
+      'CREATE TABLE IF NOT EXISTS tef_pendentes (' +
+      '  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
+      '  cupom_id INTEGER NOT NULL REFERENCES cupons(id),' +
+      '  controle TEXT NOT NULL,' +
+      '  nsu TEXT,' +
+      '  cod_autorizacao TEXT,' +
+      '  valor REAL DEFAULT 0,' +
+      '  tipo_transacao TEXT,' +
+      '  bandeira TEXT,' +
+      '  parcelas INTEGER DEFAULT 1,' +
+      '  codcob TEXT,' +
+      '  status TEXT DEFAULT ''PENDENTE'',' +
+      '  dthr_transacao TEXT,' +
+      '  dthr_confirmacao TEXT' +
+      ')'
+    );
+    ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_tef_pendentes_cupom ON tef_pendentes(cupom_id)');
+    ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_tef_pendentes_status ON tef_pendentes(status)');
+    AtualizarVersaoSchema(8);
+  end;
+
+  // Migracao incremental v8 -> v9: comprovantes TEF
+  if ObterVersaoSchema = 8 then
+  begin
+    ExecutarSQL('ALTER TABLE tef_pendentes ADD COLUMN comprovante_cliente TEXT DEFAULT ''''');
+    ExecutarSQL('ALTER TABLE tef_pendentes ADD COLUMN comprovante_loja TEXT DEFAULT ''''');
+    AtualizarVersaoSchema(9);
+  end;
+
+  // Migracao incremental v9 -> v10: cadastro de meios de pagamento do PDV
+  // (espelho de msapolo_meiopagto do Oracle)
+  if ObterVersaoSchema = 9 then
+  begin
+    ExecutarSQL(
+      'CREATE TABLE IF NOT EXISTS meiopagto (' +
+      '  id INTEGER PRIMARY KEY,' +
+      '  descricao TEXT,' +
+      '  codcob TEXT,' +
+      '  ordem INTEGER DEFAULT 0,' +
+      '  obg_dtvenc TEXT DEFAULT ''N'',' +
+      '  obg_documento TEXT DEFAULT ''N'',' +
+      '  permite_troco TEXT DEFAULT ''N'',' +
+      '  cmp TEXT' +
+      ')'
+    );
+    AtualizarVersaoSchema(10);
+  end;
+
+  // Migracao incremental v10 -> v11: taxa do plano de pagamento
+  // (espelho de msapolo_planopagto do Oracle)
+  if ObterVersaoSchema = 10 then
+  begin
+    try
+      ExecutarSQL('ALTER TABLE planos_pagamento ADD COLUMN txplano REAL DEFAULT 0');
+    except
+      // Coluna pode ja existir
+    end;
+    AtualizarVersaoSchema(11);
+  end;
+
+  // Migracao incremental v11 -> v12: prazos das parcelas do plano
+  // (dias separados por '/', ex: '15/30'; vazio = parcela unica)
+  if ObterVersaoSchema = 11 then
+  begin
+    try
+      ExecutarSQL('ALTER TABLE planos_pagamento ADD COLUMN prazos TEXT DEFAULT ''''');
+    except
+      // Coluna pode ja existir
+    end;
+    AtualizarVersaoSchema(12);
+  end;
+
+  // Migracao incremental v12 -> v13: codigos de barras adicionais por produto
+  // (espelho de mscodbarra do Oracle - EANs alem do codbarra principal)
+  if ObterVersaoSchema = 12 then
+  begin
+    ExecutarSQL(
+      'CREATE TABLE IF NOT EXISTS codbarras (' +
+      '  codbarra TEXT PRIMARY KEY,' +
+      '  codprod INTEGER NOT NULL,' +
+      '  descricao TEXT' +
+      ')'
+    );
+    ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_codbarras_codprod ON codbarras(codprod)');
+    AtualizarVersaoSchema(13);
+  end;
+
+  // v14: unidade por codigo de barras. msapolo_produtos tem 1 linha por
+  // (codprod, codbarra), cada uma com a propria unidade (ex: mesmo produto
+  // vendido em UN por um EAN e em KG por outro); a tabela produtos guarda
+  // apenas a linha principal, entao a unidade de cada EAN fica aqui.
+  if ObterVersaoSchema = 13 then
+  begin
+    ExecutarSQL(
+      'CREATE TABLE IF NOT EXISTS produto_unidades (' +
+      '  codbarra TEXT PRIMARY KEY,' +
+      '  codprod INTEGER NOT NULL,' +
+      '  unidade TEXT' +
+      ')'
+    );
+    ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_produto_unidades_codprod ON produto_unidades(codprod)');
+    AtualizarVersaoSchema(14);
+  end;
+
+  // v15: qtunit (quantidade por embalagem do EAN). A quantidade digitada no
+  // registro do item e multiplicada por esse fator (ex: digitou 2, qtunit 5
+  // -> registra 10). Vem do msapolo_produto_temp/msapolo_produtos.
+  if ObterVersaoSchema = 14 then
+  begin
+    ExecutarSQL('ALTER TABLE produtos ADD COLUMN qtunit REAL DEFAULT 1');
+    ExecutarSQL('ALTER TABLE produto_unidades ADD COLUMN qtunit REAL DEFAULT 1');
+    AtualizarVersaoSchema(15);
+  end;
+
+  // v16: cada embalagem (codprod+codbarra) tem tambem descricao e preco
+  // proprios no msapolo_produtos; o registro do item deve usar os dados da
+  // embalagem bipada, nao os da linha principal colapsada em produtos
+  if ObterVersaoSchema = 15 then
+  begin
+    ExecutarSQL('ALTER TABLE produto_unidades ADD COLUMN descricao TEXT');
+    ExecutarSQL('ALTER TABLE produto_unidades ADD COLUMN pvenda REAL DEFAULT 0');
+    ExecutarSQL('ALTER TABLE produto_unidades ADD COLUMN poferta REAL DEFAULT 0');
+    ExecutarSQL('ALTER TABLE produto_unidades ADD COLUMN dtfimoferta TEXT');
+    AtualizarVersaoSchema(16);
+  end;
+
+  // v17: tributacao IBS/CBS vinda da retaguarda (msncm_ibs_cbs + ms_trib_ibs_cbs).
+  // A regra e' resolvida do mais especifico para o mais generico:
+  // codprod -> ncm -> linha com os dois nulos (vale para todos os produtos).
+  if ObterVersaoSchema = 16 then
+  begin
+    CriarTabelaTribIBSCBS;
+    AtualizarVersaoSchema(17);
+  end;
+
+  // v18: descarte manual de documento da fila. Rejeitado nunca foi autorizado,
+  // entao nao ha o que cancelar na SEFAZ - o descarte so tira da fila local,
+  // registrando quem tirou e quando.
+  if ObterVersaoSchema = 17 then
+  begin
+    ExecutarSQL('ALTER TABLE nfce_contingencia ADD COLUMN dt_descarte TEXT');
+    ExecutarSQL('ALTER TABLE nfce_contingencia ADD COLUMN descartado_por INTEGER DEFAULT 0');
+    AtualizarVersaoSchema(18);
+  end;
+
+  // v19: a chavenfe so existe depois que a NFCe e autorizada, e o upload da
+  // venda acontece antes disso. chave_enviada marca o cupom cuja chave ja foi
+  // levada ate a msapolo_venda no Oracle (ver AtualizarChavesNoOracle).
+  if ObterVersaoSchema = 18 then
+  begin
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN chave_enviada INTEGER DEFAULT 0');
+    AtualizarVersaoSchema(19);
+  end;
+
+  // v20: cancelamento de NFCe (evento 110111). O cupom continua existindo com
+  // itens e pagamentos - o que muda e o codoper ('C') e este bloco, que guarda
+  // o protocolo do evento e o procEventoNFe para a retaguarda e para o arquivo
+  // fiscal. cancel_enviado espelha o chave_enviada: marca o cupom cujo
+  // cancelamento ja subiu para o Oracle.
+  if ObterVersaoSchema = 19 then
+  begin
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN cancelada INTEGER DEFAULT 0');
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN dthr_cancelamento TEXT');
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN protocolo_cancelamento TEXT');
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN justificativa_cancel TEXT');
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN xml_cancelamento TEXT');
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN cancelado_por INTEGER DEFAULT 0');
+    ExecutarSQL('ALTER TABLE cupons ADD COLUMN cancel_enviado INTEGER DEFAULT 0');
+    AtualizarVersaoSchema(20);
+  end;
+
+  // v21: chave PIX da filial (msfilial.chave_pix), usada para montar o
+  // QR Code (BR Code) apresentado no pagamento com PIX manual
+  if ObterVersaoSchema = 20 then
+  begin
+    ExecutarSQL('ALTER TABLE empresa ADD COLUMN chave_pix TEXT');
+    AtualizarVersaoSchema(21);
+  end;
+
+  // v22: configuracao da API Pix (ACBrPIXCD), sincronizada da msapolo_pixcd
+  // do Oracle. Com ela o QR do PIX manual vira cobranca dinamica com
+  // confirmacao automatica do recebimento.
+  if ObterVersaoSchema = 21 then
+  begin
+    CriarTabelaPixCDConfig;
+    AtualizarVersaoSchema(22);
+  end;
+
+  // v23: qtunit gravado no item do cupom (quantidade por embalagem do EAN
+  // bipado). Informativo - nao altera quantidade nem valor do item; sobe
+  // para a retaguarda em msapolo_venda_item.qtunit.
+  if ObterVersaoSchema = 22 then
+  begin
+    ExecutarSQL('ALTER TABLE cupom_itens ADD COLUMN qtunit REAL DEFAULT 1');
+    AtualizarVersaoSchema(23);
+  end;
+
+  // v24: grupo de reducao de aliquota (gRed) do IBS/CBS. cClassTrib de
+  // aliquota reduzida (CST 200) exige pRedAliq/pAliqEfet no XML, senao o
+  // SEFAZ rejeita com "Nao informado o grupo de reducao de aliquota".
+  if ObterVersaoSchema = 23 then
+  begin
+    ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN ibsuf_predaliq REAL');
+    ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN ibsuf_paliqefet REAL');
+    ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN ibsmun_predaliq REAL');
+    ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN ibsmun_paliqefet REAL');
+    ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN cbs_predaliq REAL');
+    ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN cbs_paliqefet REAL');
+    AtualizarVersaoSchema(24);
+  end;
 
   if ObterVersaoSchema < SCHEMA_VERSION then
   begin
@@ -116,12 +354,16 @@ begin
     ExecutarSQL('DROP TABLE IF EXISTS db_version');
     ExecutarSQL('DROP TABLE IF EXISTS sequencias');
     ExecutarSQL('DROP TABLE IF EXISTS produtos');
+    ExecutarSQL('DROP TABLE IF EXISTS codbarras');
+    ExecutarSQL('DROP TABLE IF EXISTS produto_unidades');
     ExecutarSQL('DROP TABLE IF EXISTS clientes');
     ExecutarSQL('DROP TABLE IF EXISTS funcionarios');
     ExecutarSQL('DROP TABLE IF EXISTS permissoes');
     ExecutarSQL('DROP TABLE IF EXISTS meios_pagamento');
+    ExecutarSQL('DROP TABLE IF EXISTS meiopagto');
     ExecutarSQL('DROP TABLE IF EXISTS bandeiras');
     ExecutarSQL('DROP TABLE IF EXISTS empresa');
+    ExecutarSQL('DROP TABLE IF EXISTS pixcd_config');
     ExecutarSQL('DROP TABLE IF EXISTS parametros');
     ExecutarSQL('DROP TABLE IF EXISTS layout_cupom');
     ExecutarSQL('DROP TABLE IF EXISTS aliquotas');
@@ -137,6 +379,11 @@ begin
     InserirDadosTeste;
     AtualizarVersaoSchema(SCHEMA_VERSION);
   end;
+
+  // Correcao de dados, depois das tabelas existirem. Fica fora do
+  // versionamento de proposito: subir SCHEMA_VERSION dispara o rebuild acima,
+  // que DROPA cupons e nfce_contingencia - o oposto do que se quer aqui.
+  RepararChavesNFCe;
 end;
 
 procedure TSQLiteDB.AbrirBanco;
@@ -185,6 +432,23 @@ begin
   finally
     LQuery.Free;
   end;
+end;
+
+function TSQLiteDB.CriarComando(const ASQL: string): TUniQuery;
+begin
+  Result := TUniQuery.Create(nil);
+  Result.Connection := FConnection;
+  Result.SQL.Text := ASQL;
+  Result.Prepare;
+end;
+
+procedure TSQLiteDB.ExecutarComando(AComando: TUniQuery; const AParams: array of Variant);
+var
+  I: Integer;
+begin
+  for I := 0 to High(AParams) do
+    AComando.Params[I].Value := AParams[I];
+  AComando.Execute;
 end;
 
 function TSQLiteDB.ExecutarSelect(const ASQL: string): TUniQuery;
@@ -264,6 +528,149 @@ begin
   SalvarEstado('SCHEMA_VERSION', IntToStr(AVersao));
 end;
 
+// Espelho de msncm_ibs_cbs + ms_trib_ibs_cbs do Oracle (ja com o join feito).
+// codprod/ncm NULL = regra geral da filial; quanto mais preenchido, mais
+// especifica a regra. Ver ResolverIBSCBS em uNFCeWeb.pas.
+procedure TSQLiteDB.CriarTabelaTribIBSCBS;
+begin
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS trib_ibs_cbs (' +
+    '  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
+    '  codfilial INTEGER,' +
+    '  ncm TEXT,' +
+    '  codprod INTEGER,' +
+    '  habilitado INTEGER DEFAULT 1,' +
+    '  cst TEXT,' +
+    '  cclasstrib TEXT,' +
+    '  pibsuf REAL DEFAULT 0,' +
+    '  pibsmun REAL DEFAULT 0,' +
+    '  pcbs REAL DEFAULT 0,' +
+    // gRed do item: reducao de aliquota. NULL = a regra nao reduz nada
+    '  ibsuf_predaliq REAL,' +
+    '  ibsuf_paliqefet REAL,' +
+    '  ibsmun_predaliq REAL,' +
+    '  ibsmun_paliqefet REAL,' +
+    '  cbs_predaliq REAL,' +
+    '  cbs_paliqefet REAL' +
+    ')'
+  );
+  ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_trib_ibscbs_prod ON trib_ibs_cbs(codprod)');
+  ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_trib_ibscbs_ncm ON trib_ibs_cbs(ncm)');
+end;
+
+// Configuracao da API Pix (cobranca dinamica via ACBrPIXCD), espelho da
+// msapolo_pixcd do Oracle. Linha unica (id=1); vazia = PixCD desligado e o
+// PIX manual segue com QR estatico + confirmacao manual do operador.
+procedure TSQLiteDB.CriarTabelaPixCDConfig;
+begin
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS pixcd_config (' +
+    '  id INTEGER PRIMARY KEY DEFAULT 1,' +
+    '  psp TEXT,' +                       // BB, ITAU, SICOOB, SICREDI, BRADESCO, SANTANDER, INTER, EFI, MERCADOPAGO...
+    '  ambiente INTEGER DEFAULT 2,' +     // 1=producao, 2=teste/homologacao
+    '  chave_pix TEXT,' +                 // vazio = usa empresa.chave_pix
+    '  client_id TEXT,' +
+    '  client_secret TEXT,' +
+    '  chave_extra TEXT,' +               // BB: developer_application_key; MercadoPago: access_token
+    '  arq_certificado TEXT,' +           // caminhos locais no caixa (ex: C:\Apolo\pix\)
+    '  arq_chave_privada TEXT,' +
+    '  arq_pfx TEXT,' +
+    '  senha_pfx TEXT,' +
+    '  expiracao_seg INTEGER DEFAULT 300,' +
+    '  ativo TEXT DEFAULT ''S''' +
+    ')'
+  );
+end;
+
+// Uma versao anterior gravava em cupons.chavenfe o texto da mensagem
+// ("NFCe autorizada. Protocolo: ...") e em cupons.protocolo_nfe o JSON de
+// retorno, com os campos chaveNFe e protocolo. Com isso a venda subia para a
+// retaguarda com lixo em chavenfe e o XML nunca era localizado.
+// O JSON tem os dois valores corretos, entao da para desfazer. Roda uma vez
+// (flag REPARO_CHAVENFE) e nao toca no schema.
+procedure TSQLiteDB.RepararChavesNFCe;
+const
+  MARCA_CHAVE = '"chaveNFe":"';
+  MARCA_PROTO = '"protocolo":"';
+var
+  LAfetados: Variant;
+begin
+  if ObterEstado('REPARO_CHAVENFE', '') = 'OK' then Exit;
+
+  try
+    LAfetados := ExecutarScalar(
+      'SELECT COUNT(*) FROM cupons WHERE protocolo_nfe LIKE ''%' + MARCA_CHAVE + '%''');
+
+    // Copia de seguranca antes de reescrever chave/protocolo de vendas fiscais
+    try
+      if FileExists(FDBPath) and (not FileExists(FDBPath + '.bak-reparo')) then
+        TFile.Copy(FDBPath, FDBPath + '.bak-reparo');
+    except
+      // backup e' desejavel, nao obrigatorio
+    end;
+
+    // 1) Recuperar chave e protocolo do JSON preso em protocolo_nfe.
+    //    substr(...) ate a proxima aspa isola cada valor.
+    ExecutarSQL(
+      'UPDATE cupons SET ' +
+      '  chavenfe = replace(substr(protocolo_nfe, ' +
+      '      instr(protocolo_nfe, ''' + MARCA_CHAVE + ''') + 12, ' +
+      '      instr(substr(protocolo_nfe, instr(protocolo_nfe, ''' + MARCA_CHAVE + ''') + 12), ''"'') - 1' +
+      '    ), ''NFe'', ''''), ' +
+      '  protocolo_nfe = CASE WHEN instr(protocolo_nfe, ''' + MARCA_PROTO + ''') > 0 THEN ' +
+      '      substr(protocolo_nfe, ' +
+      '        instr(protocolo_nfe, ''' + MARCA_PROTO + ''') + 13, ' +
+      '        instr(substr(protocolo_nfe, instr(protocolo_nfe, ''' + MARCA_PROTO + ''') + 13), ''"'') - 1' +
+      '      ) ELSE '''' END ' +
+      'WHERE protocolo_nfe LIKE ''%' + MARCA_CHAVE + '%'''
+    );
+
+    // 2) Sobrou cupom sem chave valida mas com documento em contingencia
+    ExecutarSQL(
+      'UPDATE cupons SET chavenfe = (' +
+      '  SELECT replace(nc.chave_nfe, ''NFe'', '''') FROM nfce_contingencia nc ' +
+      '  WHERE nc.cupom_id = cupons.id ORDER BY nc.id DESC LIMIT 1) ' +
+      'WHERE length(coalesce(chavenfe, '''')) <> 44 ' +
+      '  AND EXISTS (SELECT 1 FROM nfce_contingencia nc WHERE nc.cupom_id = cupons.id)'
+    );
+
+    // 3) Padronizar tudo em 44 digitos (chave sem o prefixo ''NFe'')
+    ExecutarSQL(
+      'UPDATE cupons SET chavenfe = substr(chavenfe, 4) ' +
+      'WHERE length(chavenfe) = 47 AND substr(chavenfe, 1, 3) = ''NFe'''
+    );
+    ExecutarSQL(
+      'UPDATE nfce_contingencia SET chave_nfe = substr(chave_nfe, 4) ' +
+      'WHERE length(chave_nfe) = 47 AND substr(chave_nfe, 1, 3) = ''NFe'''
+    );
+
+    // 4) O que continuar invalido vira vazio: melhor a venda subir sem chave
+    //    do que com texto de mensagem no lugar dela
+    ExecutarSQL(
+      'UPDATE cupons SET chavenfe = '''' ' +
+      'WHERE chavenfe IS NOT NULL AND chavenfe <> '''' AND length(chavenfe) <> 44'
+    );
+    ExecutarSQL(
+      'UPDATE cupons SET protocolo_nfe = '''' ' +
+      'WHERE protocolo_nfe IS NOT NULL AND protocolo_nfe LIKE ''{%'''
+    );
+
+    // 5) Chave recuperada => o XML precisa ser reenviado para a retaguarda
+    ExecutarSQL(
+      'UPDATE cupons SET doceletronico_enviado = 0 ' +
+      'WHERE length(coalesce(chavenfe, '''')) = 44 ' +
+      '  AND length(coalesce(protocolo_nfe, '''')) > 0'
+    );
+
+    SalvarEstado('REPARO_CHAVENFE', 'OK');
+    SyncLog('REPARO chavenfe/protocolo_nfe: %s cupom(ns) com JSON no lugar da chave',
+      [VarToStr(LAfetados)]);
+  except
+    on E: Exception do
+      SyncLog('REPARO chavenfe: falhou - [%s] %s', [E.ClassName, E.Message]);
+  end;
+end;
+
 procedure TSQLiteDB.CriarTabelasReferencia;
 begin
   // Produtos (espelho de msapolo_produtos no Oracle)
@@ -273,6 +680,7 @@ begin
     '  codbarra TEXT,' +
     '  descricao TEXT NOT NULL,' +
     '  unidade TEXT,' +
+    '  qtunit REAL DEFAULT 1,' +
     '  embalagem TEXT,' +
     '  ncm TEXT,' +
     '  extipi TEXT,' +
@@ -322,6 +730,32 @@ begin
     '  codfilial TEXT' +
     ')'
   );
+
+  // Codigos de barras adicionais (mscodbarra)
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS codbarras (' +
+    '  codbarra TEXT PRIMARY KEY,' +
+    '  codprod INTEGER NOT NULL,' +
+    '  descricao TEXT' +
+    ')'
+  );
+  ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_codbarras_codprod ON codbarras(codprod)');
+
+  // Dados por embalagem/codigo de barras (1 linha por codprod+codbarra do
+  // msapolo_produtos; produtos guarda apenas a linha principal)
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS produto_unidades (' +
+    '  codbarra TEXT PRIMARY KEY,' +
+    '  codprod INTEGER NOT NULL,' +
+    '  unidade TEXT,' +
+    '  qtunit REAL DEFAULT 1,' +
+    '  descricao TEXT,' +
+    '  pvenda REAL DEFAULT 0,' +
+    '  poferta REAL DEFAULT 0,' +
+    '  dtfimoferta TEXT' +
+    ')'
+  );
+  ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_produto_unidades_codprod ON produto_unidades(codprod)');
 
   // Clientes
   ExecutarSQL(
@@ -373,6 +807,20 @@ begin
     ')'
   );
 
+  // Cadastro de meios de pagamento do PDV (msapolo_meiopagto)
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS meiopagto (' +
+    '  id INTEGER PRIMARY KEY,' +
+    '  descricao TEXT,' +
+    '  codcob TEXT,' +
+    '  ordem INTEGER DEFAULT 0,' +
+    '  obg_dtvenc TEXT DEFAULT ''N'',' +
+    '  obg_documento TEXT DEFAULT ''N'',' +
+    '  permite_troco TEXT DEFAULT ''N'',' +
+    '  cmp TEXT' +
+    ')'
+  );
+
   // Bandeiras de Cartao
   ExecutarSQL(
     'CREATE TABLE IF NOT EXISTS bandeiras (' +
@@ -381,6 +829,12 @@ begin
     '  tband TEXT' +
     ')'
   );
+
+  // Tributacao IBS/CBS por produto/NCM
+  CriarTabelaTribIBSCBS;
+
+  // Configuracao da API Pix (cobranca dinamica)
+  CriarTabelaPixCDConfig;
 
   // Empresa
   ExecutarSQL(
@@ -399,7 +853,8 @@ begin
     '  cep TEXT,' +
     '  cod_cidade_ibge TEXT,' +
     '  regime_tributario INTEGER DEFAULT 1,' +
-    '  fone TEXT' +
+    '  fone TEXT,' +
+    '  chave_pix TEXT' +
     ')'
   );
 
@@ -439,7 +894,9 @@ begin
     '  codplpag INTEGER PRIMARY KEY,' +
     '  descricao TEXT,' +
     '  qtdeparcelas INTEGER DEFAULT 1,' +
-    '  intervalo_dias INTEGER DEFAULT 30' +
+    '  intervalo_dias INTEGER DEFAULT 30,' +
+    '  txplano REAL DEFAULT 0,' +
+    '  prazos TEXT DEFAULT ''''' +
     ')'
   );
 end;
@@ -504,7 +961,17 @@ begin
     '  estadoenvio INTEGER DEFAULT 0,' +
     '  qtdeenvios INTEGER DEFAULT 0,' +
     '  sincronizado INTEGER DEFAULT 0,' +
-    '  dt_sincronizacao TEXT' +
+    '  dt_sincronizacao TEXT,' +
+    '  doceletronico_enviado INTEGER DEFAULT 0,' +
+    '  chave_enviada INTEGER DEFAULT 0,' +
+    // Cancelamento da NFCe (evento 110111) - ver migration v20
+    '  cancelada INTEGER DEFAULT 0,' +
+    '  dthr_cancelamento TEXT,' +
+    '  protocolo_cancelamento TEXT,' +
+    '  justificativa_cancel TEXT,' +
+    '  xml_cancelamento TEXT,' +
+    '  cancelado_por INTEGER DEFAULT 0,' +
+    '  cancel_enviado INTEGER DEFAULT 0' +
     ')'
   );
 
@@ -520,6 +987,7 @@ begin
     '  unidade TEXT,' +
     '  embalagem TEXT,' +
     '  qt REAL DEFAULT 0,' +
+    '  qtunit REAL DEFAULT 1,' +
     '  punit REAL DEFAULT 0,' +
     '  vlprod REAL DEFAULT 0,' +
     '  vldesconto REAL DEFAULT 0,' +
@@ -632,6 +1100,27 @@ begin
     ')'
   );
 
+  // TEF Pendentes (transacoes TEF aguardando confirmacao/desfazimento)
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS tef_pendentes (' +
+    '  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
+    '  cupom_id INTEGER NOT NULL REFERENCES cupons(id),' +
+    '  controle TEXT NOT NULL,' +
+    '  nsu TEXT,' +
+    '  cod_autorizacao TEXT,' +
+    '  valor REAL DEFAULT 0,' +
+    '  tipo_transacao TEXT,' +
+    '  bandeira TEXT,' +
+    '  parcelas INTEGER DEFAULT 1,' +
+    '  codcob TEXT,' +
+    '  status TEXT DEFAULT ''PENDENTE'',' +
+    '  dthr_transacao TEXT,' +
+    '  dthr_confirmacao TEXT,' +
+    '  comprovante_cliente TEXT DEFAULT '''',' +
+    '  comprovante_loja TEXT DEFAULT ''''' +
+    ')'
+  );
+
   // Pre-vendas importadas
   ExecutarSQL(
     'CREATE TABLE IF NOT EXISTS prevenda (' +
@@ -688,7 +1177,9 @@ begin
     '  dt_envio TEXT,' +
     '  tentativas INTEGER DEFAULT 0,' +
     '  ultimo_erro TEXT,' +
-    '  dt_ultima_tentativa TEXT' +
+    '  dt_ultima_tentativa TEXT,' +
+    '  dt_descarte TEXT,' +
+    '  descartado_por INTEGER DEFAULT 0' +
     ')'
   );
 
@@ -764,6 +1255,10 @@ begin
   ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_nfce_cont_chave ON nfce_contingencia(chave_nfe)');
   ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_nfce_cont_cupom ON nfce_contingencia(cupom_id)');
 
+  // TEF Pendentes
+  ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_tef_pendentes_cupom ON tef_pendentes(cupom_id)');
+  ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_tef_pendentes_status ON tef_pendentes(status)');
+
   // Sync log
   ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_sync_log_status ON sync_log(status)');
   ExecutarSQL('CREATE INDEX IF NOT EXISTS idx_sync_log_tabela ON sync_log(tabela)');
@@ -798,23 +1293,28 @@ begin
   // admin/1, caixa/1
   ExecutarSQL(
     'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo, ind_vendedor) VALUES ' +
-    '(1, ''Administrador'', ''' + Ofuscar('1', 'admin') + ''', ''admin'', ''Gerente'', ''S'')'
+    '(1, ''Administrador'', ''1'', ''admin'', ''Gerente'', ''S'')'
   );
   ExecutarSQL(
     'INSERT INTO funcionarios (matricula, nome, senhadb, usuario, cargo, ind_vendedor) VALUES ' +
-    '(2, ''Operador Caixa'', ''' + Ofuscar('1', 'caixa') + ''', ''caixa'', ''Caixa'', ''N'')'
+    '(2, ''Operador Caixa'', ''1'', ''caixa'', ''Caixa'', ''N'')'
   );
 
   // === PERMISSOES ===
-  // Dar todas as permissoes ao admin (matricula=1)
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 1)');  // Abrir caixa
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 2)');  // Fechar caixa
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 3)');  // Sangria
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 4)');  // Suprimento
+  // codcontrole segue a numeracao da rotina 8002 no Oracle (mssubrotina):
+  // 2 = Desconto no item, 3 = Desconto no total da venda, 4 = Cancelar item,
+  // 5 = Cancelamento da venda, 6 = Fechamento do caixa, 18 = Sangria.
+  // A sincronizacao (msacesso codrotina=8002) sobrescreve esta tabela; o seed
+  // apenas garante acesso total ao admin (matricula=1) para uso offline/1o acesso.
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 1)');
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 2)');  // Desconto no item
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 3)');  // Desconto na venda
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 4)');  // Cancelar item
   ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 5)');  // Cancelar venda
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 6)');  // Cancelar item
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 7)');  // Desconto
-  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 99)'); // Supervisor
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 6)');  // Fechar caixa
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 7)');
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 18)'); // Sangria
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 99)');
 
   // === EMPRESA ===
   ExecutarSQL(
