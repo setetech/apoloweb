@@ -115,11 +115,11 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCC_ExeOutput>C:\Apolo\</DCC_ExeOutput>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
-        <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=26.9.0.4;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=;ProgramID=com.embarcadero.$(MSBuildProjectName)</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=26.10.0.1;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=;ProgramID=com.embarcadero.$(MSBuildProjectName)</VerInfo_Keys>
         <DCC_DcuOutput>c:\dcu</DCC_DcuOutput>
         <VerInfo_MajorVer>26</VerInfo_MajorVer>
-        <VerInfo_MinorVer>9</VerInfo_MinorVer>
-        <VerInfo_Build>4</VerInfo_Build>
+        <VerInfo_MinorVer>10</VerInfo_MinorVer>
+        <VerInfo_Build>1</VerInfo_Build>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
@@ -148,6 +148,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="uWebAssets.pas"/>
         <DCCReference Include="uSyncLog.pas"/>
         <DCCReference Include="uTEFLog.pas"/>
+        <DCCReference Include="uTEFCliSiTef.pas"/>
         <DCCReference Include="uUploadWorker.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>

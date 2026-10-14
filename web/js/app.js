@@ -13,6 +13,7 @@ const ApoloApp = {
     Products.init();
     Customers.init();
     Payment.init();
+    TEFInterativo.init();
     NFCePanel.init();
     Reports.init();
     Screensaver.init();
@@ -218,7 +219,13 @@ const ApoloApp = {
 
       case 'tefResultado':
         // Resultado de transacao TEF (push do Delphi)
+        TEFInterativo.fechar();
         Payment._onTEFResultado(data);
+        break;
+
+      case 'tefInteracao':
+        // [TEF] modo=clisitef: mensagem, menu, pergunta ou coleta da CliSiTef
+        TEFInterativo.onEvento(data);
         break;
 
       case 'tefPixQrCode':
@@ -229,11 +236,13 @@ const ApoloApp = {
 
       case 'tefAdmResultado':
         // Menu administrativo do gerenciador: so volta quando o operador sai
+        TEFInterativo.fechar();
         TEFAdm.onResultadoAdm(data);
         break;
 
       case 'tefEstornoResultado':
         // Resultado do CNC disparado pela aba TEF
+        TEFInterativo.fechar();
         TEFAdm.onResultadoEstorno(data);
         break;
 

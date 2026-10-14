@@ -94,6 +94,11 @@ const
   TEF_PASTA_RESP_PADRAO = 'C:\Tef_Dial\Resp\';
   TEF_TIMEOUT_PADRAO    = 120;  // segundos aguardando a resposta do pinpad
 
+  // TEF modo=clisitef: CliSiTef32I.dll chamada direto (SiTef / Fiserv)
+  TEF_MODO_CLISITEF     = 'clisitef';
+  TEF_SITEF_DLL_PADRAO  = 'C:\Apolo\clisitef\CliSiTef32I.dll';  // kit CliSiTef do PDV
+  TEF_SITEF_IP_PADRAO   = 'tls-prod.fiservapp.com';  // SiTef da Fiserv em producao
+
   // TEF + PIX: onde o QR Code e' apresentado ao cliente
   //   pinpad = a adquirente desenha o QR no visor do pinpad (independe do PDV)
   //   tela   = o PDV exibe o BR Code devolvido pelo gerenciador

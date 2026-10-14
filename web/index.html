@@ -416,6 +416,37 @@
     </div>
   </div>
 
+  <!-- ===== MODAL TEF INTERATIVO ([TEF] modo=clisitef) =====
+       A CliSiTef nao tem tela: mensagens, menus, sim/nao e coletas chegam
+       por 'tefInteracao' e sao desenhados aqui (js/tefinterativo.js).
+       data-esc-bloqueado: o ESC cancela a pergunta em vez de so fechar. -->
+  <div id="modal-tef-interacao" class="modal hidden" data-esc-bloqueado="1">
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h2>TEF</h2>
+      </div>
+      <div class="modal-body tefi-body">
+        <p id="tefi-cabecalho" class="tefi-cabecalho hidden"></p>
+        <p id="tefi-mensagem" class="tefi-mensagem hidden"></p>
+        <p id="tefi-cliente" class="tefi-cliente hidden"></p>
+        <div id="tefi-espera" class="tefi-espera">
+          <div class="tef-loading-spinner"></div>
+        </div>
+        <h3 id="tefi-titulo" class="tefi-titulo hidden"></h3>
+        <div id="tefi-opcoes" class="tefi-opcoes hidden"></div>
+        <div id="tefi-input-group" class="input-group hidden">
+          <input type="text" id="tefi-input" autocomplete="off">
+          <small id="tefi-input-hint" class="logo-hint"></small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="btn-tefi-cancelar" type="button">Esc Cancelar</button>
+        <button class="btn btn-secondary hidden" id="btn-tefi-voltar" type="button">F2 Voltar</button>
+        <button class="btn btn-primary hidden" id="btn-tefi-ok" type="button">Enter OK</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== MODAL BUSCA PRODUTO ===== -->
   <div id="modal-produtos" class="modal hidden">
     <div class="modal-content modal-lg">
@@ -680,7 +711,83 @@
               <select id="tef-modo">
                 <option value="http">HTTP - API TefGpAPI (porta 8000)</option>
                 <option value="arquivo">Arquivo - intercambio direto com o Tef_Dial</option>
+                <option value="clisitef">CliSiTef - DLL direto (SiTef / Fiserv)</option>
               </select>
+            </div>
+
+            <div class="input-group tef-so-clisitef">
+              <label for="tef-sitef-dll">DLL da CliSiTef</label>
+              <input type="text" id="tef-sitef-dll" placeholder="C:\Apolo\clisitef\CliSiTef32I.dll">
+              <small class="logo-hint">
+                O PDV carrega a DLL e fala direto com o SiTef - dispensa o
+                Tef_Dial e o TefGpAPI. Menus e coletas aparecem na tela do PDV.
+                CliSiTef.ini e CONFITLS.INI (TLS da Fiserv) ficam na pasta da
+                DLL. Feche o Tef_Dial: os dois nao podem usar o pinpad ao
+                mesmo tempo.
+              </small>
+            </div>
+            <div class="input-group tef-so-clisitef">
+              <label for="tef-sitef-ip">Servidor SiTef</label>
+              <input type="text" id="tef-sitef-ip" placeholder="tls-prod.fiservapp.com">
+            </div>
+            <div class="input-group tef-so-clisitef">
+              <label for="tef-sitef-loja">Codigo da loja (8 caracteres)</label>
+              <input type="text" id="tef-sitef-loja" maxlength="8" placeholder="00000000">
+            </div>
+            <div class="input-group tef-so-clisitef">
+              <label for="tef-sitef-terminal">Codigo do terminal (8 caracteres)</label>
+              <input type="text" id="tef-sitef-terminal" maxlength="8" placeholder="00000001">
+            </div>
+            <div class="input-group tef-so-clisitef">
+              <label for="tef-sitef-param">Parametros adicionais</label>
+              <input type="text" id="tef-sitef-param" placeholder="ex: PortaPinPad=AUTO_USB;TokenRegistro=...">
+              <small class="logo-hint">
+                Lista chave=valor separada por ponto e virgula, enviada ao
+                ConfiguraIntSiTefInterativoEx. Com servidor *.fiservapp.com e
+                sem CONFITLS.INI na pasta da DLL, o PDV inclui
+                TipoComunicacaoExterna=TLSGWP se nao for informado.
+              </small>
+            </div>
+
+            <!-- Arquivos do kit (CliSiTef.ini / CONFITLS.INI na pasta da DLL).
+                 O Salvar da aba grava aqui tambem quando o modo e clisitef -->
+            <div class="tef-so-clisitef tef-kit">
+              <h3 class="cfg-titulo">Kit CliSiTef</h3>
+              <div class="cfg-status" id="tef-kit-status"></div>
+
+              <div class="input-group">
+                <label for="tef-kit-porta">Porta do pinpad</label>
+                <input type="text" id="tef-kit-porta" list="tef-kit-portas" placeholder="AUTO_USB">
+                <datalist id="tef-kit-portas">
+                  <option value="AUTO_USB">
+                  <option value="COM1"><option value="COM2"><option value="COM3">
+                  <option value="COM4"><option value="COM5"><option value="COM6">
+                  <option value="COM7"><option value="COM8"><option value="COM9">
+                </datalist>
+                <small class="logo-hint">
+                  AUTO_USB acha o pinpad USB sozinho. Grava em CliSiTef.ini
+                  [PinPadCompartilhado] Porta.
+                </small>
+              </div>
+
+              <label class="cfg-check">
+                <input type="checkbox" id="tef-kit-trace">
+                <span>Trace da CliSiTef (log proprio da DLL, para o suporte da Fiserv)</span>
+              </label>
+
+              <div class="input-group">
+                <label for="tef-kit-tls-url">Servidor TLS (URLTLS)</label>
+                <input type="text" id="tef-kit-tls-url" placeholder="tls-prod.fiservapp.com">
+              </div>
+              <div class="input-group">
+                <label for="tef-kit-token">Token de registro da Fiserv</label>
+                <input type="password" id="tef-kit-token" autocomplete="off" placeholder="0000-0000-0000-0000">
+                <small class="logo-hint" id="tef-kit-token-hint">
+                  Fornecido pela Fiserv. Grava em CONFITLS.INI; o token gravado
+                  nunca e exibido - deixe em branco para manter o atual.
+                </small>
+              </div>
+
             </div>
 
             <div class="input-group tef-so-http">
@@ -903,6 +1010,7 @@
   <script src="js/customers.js"></script>
   <script src="js/qrcode.js"></script>
   <script src="js/payment.js"></script>
+  <script src="js/tefinterativo.js"></script>
   <script src="js/nfce.js"></script>
   <script src="js/screensaver.js"></script>
   <script src="js/reports.js"></script>

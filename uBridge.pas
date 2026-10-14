@@ -8,7 +8,7 @@ uses
   System.Math, System.StrUtils, System.IOUtils, System.NetEncoding,
   Winapi.ShellAPI, Winapi.Windows,
   Uni, uSQLiteDB, uConstantesWeb, uTypesApoloWeb, uTEF, Data.DB,WinSpool, Printers,
-  uContingencia, uSyncLog, uTEFLog, uPixCD;
+  uContingencia, uSyncLog, uTEFLog, uPixCD, uTEFCliSiTef;
 
 
 type
@@ -85,6 +85,12 @@ type
     function DoObterParametrosTEF(const AData: string): string;
     function DoSalvarParametrosTEF(const AData: string): string;
     function DoTestarTEF(const AData: string): string;
+    // modo=clisitef: resposta da tela a um menu/pergunta/coleta da CliSiTef
+    function DoResponderTEF(const AData: string): string;
+    // modo=clisitef: arquivos do kit (CliSiTef.ini / CONFITLS.INI)
+    function DoLerKitCliSiTef(const AData: string): string;
+    function DoSalvarKitCliSiTef(const AData: string): string;
+    function KitCliSiTefJson(const ADll: string): TJSONObject;
 
     // TEF administrativo (aba TEF da tela de Documentos Fiscais)
     function DoAdministracaoTEF(const AData: string): string;
@@ -113,6 +119,11 @@ type
       const AControle: string; AConfirmar: Boolean);
     // NCN de uma aprovacao que nao entrou na venda; libera FTEFEmCurso ao fim
     procedure DesfazerTEFNaoRegistrado(ACupomId: Integer; const AControle: string);
+    // Estorno (CNC) em thread; o desfecho chega pelo 'tefEstornoResultado'
+    procedure EstornarTEFEmSegundoPlano(AId, ACupomId: Integer; AValor: Double;
+      const ANSU, AControle: string);
+    // Vias devolvidas pelo menu administrativo (reimpressao, relatorios)
+    procedure ImprimirViasTEF(const ACliente, ALoja: TArray<string>);
 
     // Autenticacao
     function DoLogin(const AData: string): string;
@@ -402,6 +413,16 @@ begin
     Exit;
   end;
 
+  if (LConfig.Modo = tmCliSiTef) and
+     ((Trim(LConfig.SitefDll) = '') or (Trim(LConfig.SitefIP) = '') or
+      (Trim(LConfig.SitefLoja) = '') or (Trim(LConfig.SitefTerminal) = '')) then
+  begin
+    TEFLog('TEF habilitado em modo clisitef sem sitef_dll/sitef_ip/sitef_loja/' +
+      'sitef_terminal - TEF desligado');
+    FTEFHabilitado := False;
+    Exit;
+  end;
+
   FTEFClient := CriarTEFClient(LConfig);
   FTEFDescricao := FTEFClient.Descricao;
 
@@ -426,6 +447,24 @@ begin
           finally
             LJson.Free;
           end;
+        end
+      );
+    end
+  );
+
+  // modo=clisitef: os menus, perguntas e coletas da CliSiTef sao desenhados
+  // pela tela do PDV (web/js/tefinterativo.js). Dispara na thread da DLL.
+  FTEFClient.SetOnInteracao(
+    procedure(const AJson: string)
+    var
+      LJsonTxt: string;
+    begin
+      LJsonTxt := AJson;
+      TThread.Queue(nil,
+        procedure
+        begin
+          if Assigned(FOnEnviarParaJS) then
+            FOnEnviarParaJS('tefInteracao', LJsonTxt);
         end
       );
     end
@@ -520,6 +559,9 @@ begin
     else if AAction = 'obterParametrosTEF' then Result := DoObterParametrosTEF(AData)
     else if AAction = 'salvarParametrosTEF' then Result := DoSalvarParametrosTEF(AData)
     else if AAction = 'testarTEF' then Result := DoTestarTEF(AData)
+    else if AAction = 'responderTEF' then Result := DoResponderTEF(AData)
+    else if AAction = 'lerKitCliSiTef' then Result := DoLerKitCliSiTef(AData)
+    else if AAction = 'salvarKitCliSiTef' then Result := DoSalvarKitCliSiTef(AData)
     else if AAction = 'administracaoTEF' then Result := DoAdministracaoTEF(AData)
     else if AAction = 'listarTransacoesTEF' then Result := DoListarTransacoesTEF(AData)
     else if AAction = 'estornarTEF' then Result := DoEstornarTEF(AData)
@@ -4091,6 +4133,9 @@ begin
     TJSONBool.Create(FTEFConfig.PixQr = pqTela));
   // Base do watchdog da tela de espera (payment.js)
   LDados.AddPair('tefTimeout', TJSONNumber.Create(FTEFConfig.TimeoutSeg));
+  // clisitef: menus e coletas vem para a tela do PDV (nao ha gerenciador)
+  LDados.AddPair('tefInterativo',
+    TJSONBool.Create(FTEFHabilitado and (FTEFConfig.Modo = tmCliSiTef)));
   Result := CriarRespostaSucesso('OK', LDados);
 end;
 
@@ -4114,6 +4159,12 @@ begin
   LDados.AddPair('pixQr', FTEFConfig.PixQrTexto);
   LDados.AddPair('pixQrCampos', FTEFConfig.PixQrCampos);
   LDados.AddPair('pixQrChaves', FTEFConfig.PixQrChaves);
+  LDados.AddPair('sitefDll', FTEFConfig.SitefDll);
+  LDados.AddPair('sitefIp', FTEFConfig.SitefIP);
+  LDados.AddPair('sitefLoja', FTEFConfig.SitefLoja);
+  LDados.AddPair('sitefTerminal', FTEFConfig.SitefTerminal);
+  LDados.AddPair('sitefParamAdic', FTEFConfig.SitefParamAdic);
+  LDados.AddPair('kit', KitCliSiTefJson(FTEFConfig.SitefDll));
   LDados.AddPair('numCaixa', TJSONNumber.Create(FTEFNumCaixa));
   LDados.AddPair('arquivoIni', ARQ_APOLOWEB_INI);
   LDados.AddPair('descricao', FTEFDescricao);
@@ -4154,6 +4205,13 @@ begin
       FTEFConfig.PixQrChaves));
     if AConfig.PixQrCampos = '' then AConfig.PixQrCampos := TEF_PIX_QR_AUTO;
     if AConfig.PixQrChaves = '' then AConfig.PixQrChaves := TEF_PIX_QR_AUTO;
+    AConfig.SitefDll := Trim(LJson.GetValue<string>('sitefDll', FTEFConfig.SitefDll));
+    AConfig.SitefIP := Trim(LJson.GetValue<string>('sitefIp', FTEFConfig.SitefIP));
+    AConfig.SitefLoja := Trim(LJson.GetValue<string>('sitefLoja', FTEFConfig.SitefLoja));
+    AConfig.SitefTerminal := Trim(LJson.GetValue<string>('sitefTerminal',
+      FTEFConfig.SitefTerminal));
+    AConfig.SitefParamAdic := Trim(LJson.GetValue<string>('sitefParamAdic',
+      FTEFConfig.SitefParamAdic));
     AConfig.Identificacao := FTEFNumCaixa;
 
     if (AConfig.TimeoutSeg < 10) or (AConfig.TimeoutSeg > 600) then
@@ -4187,6 +4245,39 @@ begin
       end;
     end;
 
+    if AConfig.Habilitado and (AConfig.Modo = tmCliSiTef) then
+    begin
+      if not TFile.Exists(AConfig.SitefDll) then
+      begin
+        AErro := 'CliSiTef nao encontrada: ' + AConfig.SitefDll;
+        Exit;
+      end;
+      if AConfig.SitefIP = '' then
+      begin
+        AErro := 'Informe o endereco do servidor SiTef';
+        Exit;
+      end;
+      // Loja e terminal tem 8 posicoes; numero curto ganha zeros a esquerda
+      if (AConfig.SitefLoja <> '') and (Length(AConfig.SitefLoja) < 8) and
+         (StrToInt64Def(AConfig.SitefLoja, -1) >= 0) then
+        AConfig.SitefLoja := StringOfChar('0', 8 - Length(AConfig.SitefLoja)) +
+          AConfig.SitefLoja;
+      if (AConfig.SitefTerminal <> '') and (Length(AConfig.SitefTerminal) < 8) and
+         (StrToInt64Def(AConfig.SitefTerminal, -1) >= 0) then
+        AConfig.SitefTerminal := StringOfChar('0', 8 - Length(AConfig.SitefTerminal)) +
+          AConfig.SitefTerminal;
+      if Length(AConfig.SitefLoja) <> 8 then
+      begin
+        AErro := 'O codigo da loja SiTef deve ter 8 caracteres';
+        Exit;
+      end;
+      if Length(AConfig.SitefTerminal) <> 8 then
+      begin
+        AErro := 'O codigo do terminal SiTef deve ter 8 caracteres';
+        Exit;
+      end;
+    end;
+
     Result := True;
   finally
     LJson.Free;
@@ -4216,6 +4307,11 @@ begin
       LIni.WriteString('TEF', 'pix_qr', LConfig.PixQrTexto);
       LIni.WriteString('TEF', 'pix_qr_campos', LConfig.PixQrCampos);
       LIni.WriteString('TEF', 'pix_qr_chaves', LConfig.PixQrChaves);
+      LIni.WriteString('TEF', 'sitef_dll', LConfig.SitefDll);
+      LIni.WriteString('TEF', 'sitef_ip', LConfig.SitefIP);
+      LIni.WriteString('TEF', 'sitef_loja', LConfig.SitefLoja);
+      LIni.WriteString('TEF', 'sitef_terminal', LConfig.SitefTerminal);
+      LIni.WriteString('TEF', 'sitef_param_adic', LConfig.SitefParamAdic);
     finally
       LIni.Free;
     end;
@@ -4263,6 +4359,97 @@ begin
     Result := CriarRespostaSucesso('Gerenciador TEF respondeu', LDados)
   else
     Result := CriarRespostaSucesso('Gerenciador TEF nao respondeu', LDados);
+end;
+
+// Estado do kit CliSiTef para a aba TEF. O token nunca vai para a tela: so
+// se ele esta configurado.
+function TApoloBridge.KitCliSiTefJson(const ADll: string): TJSONObject;
+var
+  LKit: TCliSiTefKit;
+begin
+  LKit := CliSiTefLerKit(ADll);
+  Result := TJSONObject.Create;
+  Result.AddPair('pasta', LKit.Pasta);
+  Result.AddPair('versao', LKit.Versao);
+  Result.AddPair('dllExiste', TJSONBool.Create(LKit.DllExiste));
+  Result.AddPair('iniExiste', TJSONBool.Create(LKit.IniExiste));
+  Result.AddPair('portaPinPad', LKit.PortaPinPad);
+  Result.AddPair('trace', TJSONBool.Create(LKit.Trace));
+  Result.AddPair('tlsExiste', TJSONBool.Create(LKit.TlsExiste));
+  Result.AddPair('tlsTipo', LKit.TlsTipo);
+  Result.AddPair('tlsUrl', LKit.TlsUrl);
+  Result.AddPair('tokenConfigurado', TJSONBool.Create(LKit.TokenConfigurado));
+end;
+
+// A tela trocou o caminho da DLL: mostra o kit daquela pasta
+function TApoloBridge.DoLerKitCliSiTef(const AData: string): string;
+var
+  LJson: TJSONObject;
+  LDll: string;
+begin
+  LDll := FTEFConfig.SitefDll;
+  LJson := TJSONObject.ParseJSONValue(AData) as TJSONObject;
+  if LJson <> nil then
+  try
+    LDll := Trim(LJson.GetValue<string>('dll', LDll));
+  finally
+    LJson.Free;
+  end;
+  Result := CriarRespostaSucesso('OK', KitCliSiTefJson(LDll));
+end;
+
+{ Grava porta do pinpad e trace no CliSiTef.ini e o TLS (URL, token) no
+  CONFITLS.INI da pasta da DLL. Token vazio = mantem o gravado. Vale na
+  proxima operacao TEF (o ConfiguraIntSiTefInterativo e' refeito). }
+function TApoloBridge.DoSalvarKitCliSiTef(const AData: string): string;
+var
+  LJson: TJSONObject;
+  LDll, LPorta, LUrl, LToken: string;
+  LTrace: Boolean;
+begin
+  if FTEFEmCurso then
+    Exit(CriarRespostaErro('Ha uma transacao TEF em andamento'));
+
+  LJson := TJSONObject.ParseJSONValue(AData) as TJSONObject;
+  if LJson = nil then Exit(CriarRespostaErro('Dados invalidos'));
+  try
+    LDll := Trim(LJson.GetValue<string>('dll', FTEFConfig.SitefDll));
+    LPorta := Trim(LJson.GetValue<string>('portaPinPad', ''));
+    LTrace := LJson.GetValue<Boolean>('trace', False);
+    LUrl := Trim(LJson.GetValue<string>('tlsUrl', ''));
+    LToken := Trim(LJson.GetValue<string>('token', ''));
+  finally
+    LJson.Free;
+  end;
+
+  try
+    CliSiTefGravarKit(LDll, LPorta, LTrace, LUrl, LToken);
+  except
+    on E: Exception do
+      Exit(CriarRespostaErro(E.Message));
+  end;
+  Result := CriarRespostaSucesso('Configuracao do kit CliSiTef salva',
+    KitCliSiTefJson(LDll));
+end;
+
+// modo=clisitef: a tela respondeu um menu/pergunta/coleta ('tefInteracao').
+// id 0 + acao=cancelar = desistir com o pinpad esperando (sem pergunta na tela)
+function TApoloBridge.DoResponderTEF(const AData: string): string;
+var
+  LJson: TJSONObject;
+begin
+  if FTEFClient = nil then
+    Exit(CriarRespostaErro('TEF nao inicializado'));
+
+  LJson := TJSONObject.ParseJSONValue(AData) as TJSONObject;
+  if LJson = nil then Exit(CriarRespostaErro('Dados invalidos'));
+  try
+    FTEFClient.ResponderInteracao(LJson.GetValue<Integer>('id', 0),
+      LJson.GetValue<string>('acao', 'ok'), LJson.GetValue<string>('valor', ''));
+  finally
+    LJson.Free;
+  end;
+  Result := CriarRespostaSucesso('OK');
 end;
 
 // =========================================================================
@@ -4320,6 +4507,16 @@ begin
               LJson.AddPair('status', LResp.Status);
               LJson.AddPair('erro', LResp.Erro);
               LJson.AddPair('nsu', LResp.NSU);
+              // CliSiTef devolve as vias (reimpressao, estorno pelo menu)
+              // para a automacao imprimir; os gerenciadores imprimem sozinhos
+              if (Length(LResp.ImpressoCliente) > 0) or
+                 (Length(LResp.ImpressoLoja) > 0) then
+              try
+                ImprimirViasTEF(LResp.ImpressoCliente, LResp.ImpressoLoja);
+              except
+                on E: Exception do
+                  LJson.AddPair('erroImpressao', E.Message);
+              end;
             end;
             if Assigned(FOnEnviarParaJS) then
               FOnEnviarParaJS('tefAdmResultado', LJson.ToJSON);
@@ -4430,7 +4627,19 @@ begin
 
   // Retorna na hora; o resultado chega por 'tefEstornoResultado'
   Result := CriarRespostaSucesso('Estorno enviado ao gerenciador, aguarde...');
+  EstornarTEFEmSegundoPlano(LId, LCupomId, LValor, LNSU, LControle);
+end;
 
+{ Metodo proprio para o anonimo capturar os parametros por valor (ver
+  DispararResolucaoTEF). No modo clisitef o estorno conversa com o operador
+  pela tela, entao nunca pode rodar preso na thread principal. }
+procedure TApoloBridge.EstornarTEFEmSegundoPlano(AId, ACupomId: Integer;
+  AValor: Double; const ANSU, AControle: string);
+var
+  LNSU, LControle: string;
+begin
+  LNSU := ANSU;
+  LControle := AControle;
   TThread.CreateAnonymousThread(
     procedure
     var
@@ -4439,7 +4648,7 @@ begin
     begin
       LErroThread := '';
       try
-        LResp := FTEFClient.Cancelar(LCupomId, LValor, LNSU, LControle);
+        LResp := FTEFClient.Cancelar(ACupomId, AValor, LNSU, LControle);
       except
         on E: Exception do
         begin
@@ -4454,11 +4663,22 @@ begin
           LJsonResp: TJSONObject;
         begin
           if (LErroThread = '') and LResp.Sucesso then
+          begin
             FSQLite.ExecutarSQL(
               'UPDATE tef_pendentes SET status = ''ESTORNADO'', ' +
               'dthr_confirmacao = datetime(''now'',''localtime'') WHERE id = ' +
-              IntToStr(LId)
+              IntToStr(AId)
             );
+            // CliSiTef devolve o comprovante do estorno para a automacao
+            if (Length(LResp.ImpressoCliente) > 0) or
+               (Length(LResp.ImpressoLoja) > 0) then
+            try
+              ImprimirViasTEF(LResp.ImpressoCliente, LResp.ImpressoLoja);
+            except
+              on E: Exception do
+                TEFLog('falha ao imprimir comprovante do estorno: ' + E.Message);
+            end;
+          end;
 
           LJsonResp := TJSONObject.Create;
           try
@@ -4598,7 +4818,7 @@ var
   LSucesso: Boolean;
   LDados: TJSONObject;
   LQuery: TUniQuery;
-  LEstornos, LFalhasEstorno: Integer;
+  LEstornos, LFalhasEstorno, LEstornosDisparados: Integer;
 begin
   if not Assigned(FOnCancelarNFCe) then
     Exit(CriarRespostaErro('Cancelamento de NFCe nao disponivel (NFCe nao inicializada)'));
@@ -4652,6 +4872,7 @@ begin
   //    isso a contagem volta na resposta em vez de abortar tudo.
   LEstornos := 0;
   LFalhasEstorno := 0;
+  LEstornosDisparados := 0;
   if FTEFHabilitado and (FTEFClient <> nil) then
   begin
     LQuery := FSQLite.ExecutarSelect(
@@ -4662,6 +4883,19 @@ begin
     try
       while not LQuery.Eof do
       begin
+        // CliSiTef: o estorno pergunta coisas na tela (tipo, senha, cartao) e
+        // este handler roda dentro do evento do WebView2, que nao entrega a
+        // resposta enquanto ele nao voltar. Vai para segundo plano; cada
+        // desfecho chega pelo 'tefEstornoResultado'.
+        if FTEFConfig.Modo = tmCliSiTef then
+        begin
+          EstornarTEFEmSegundoPlano(LQuery.FieldByName('id').AsInteger, LCupomId,
+            LQuery.FieldByName('valor').AsFloat, LQuery.FieldByName('nsu').AsString,
+            LQuery.FieldByName('controle').AsString);
+          Inc(LEstornosDisparados);
+          LQuery.Next;
+          Continue;
+        end;
         try
           if FTEFClient.Cancelar(LCupomId,
                LQuery.FieldByName('valor').AsFloat,
@@ -4709,11 +4943,16 @@ begin
     LMensagem := LMensagem + Format(
       ' ATENCAO: %d transacao(oes) TEF nao puderam ser estornadas - ' +
       'estorne pela aba TEF.', [LFalhasEstorno]);
+  if LEstornosDisparados > 0 then
+    LMensagem := LMensagem + Format(
+      ' Estorno TEF de %d transacao(oes) em andamento - siga as instrucoes ' +
+      'na tela e no pinpad.', [LEstornosDisparados]);
 
   LDados := TJSONObject.Create;
   LDados.AddPair('cupomId', TJSONNumber.Create(LCupomId));
   LDados.AddPair('estornosTEF', TJSONNumber.Create(LEstornos));
   LDados.AddPair('falhasEstornoTEF', TJSONNumber.Create(LFalhasEstorno));
+  LDados.AddPair('estornosTEFEmAndamento', TJSONNumber.Create(LEstornosDisparados));
   Result := CriarRespostaSucesso(LMensagem, LDados);
 end;
 
@@ -5282,6 +5521,24 @@ begin
     end;
   finally
     LQuery.Free;
+  end;
+end;
+
+procedure TApoloBridge.ImprimirViasTEF(const ACliente, ALoja: TArray<string>);
+var
+  LErro: string;
+begin
+  if Length(ACliente) > 0 then
+  begin
+    LErro := ImprimirTextoCupom(string.Join(#13#10, ACliente));
+    if LErro <> '' then
+      raise Exception.Create(LErro);
+  end;
+  if Length(ALoja) > 0 then
+  begin
+    LErro := ImprimirTextoCupom(string.Join(#13#10, ALoja));
+    if LErro <> '' then
+      raise Exception.Create(LErro);
   end;
 end;
 

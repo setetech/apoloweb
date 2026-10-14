@@ -1,11 +1,11 @@
 unit uTEF;
 
 { ============================================================================
-  Cliente TEF com DOIS modos de integracao, selecionaveis em apoloweb.ini:
+  Cliente TEF com TRES modos de integracao, selecionaveis em apoloweb.ini:
 
   [TEF]
   habilitado=1
-  modo=http                       ; http | arquivo
+  modo=http                       ; http | arquivo | clisitef
   url=http://127.0.0.1:8000/api   ; usado quando modo=http
   pasta_req=C:\Tef_Dial\Req\      ; usado quando modo=arquivo
   pasta_resp=C:\Tef_Dial\Resp\    ; usado quando modo=arquivo
@@ -14,13 +14,22 @@ unit uTEF;
   pix_qr=pinpad                   ; pinpad | tela  (onde o QR do PIX aparece)
   pix_qr_campos=auto              ; so com pix_qr=tela + modo=arquivo
   pix_qr_chaves=auto              ; so com pix_qr=tela + modo=http
+  sitef_dll=C:\Apolo\clisitef\CliSiTef32I.dll ; so com modo=clisitef
+  sitef_ip=tls-prod.fiservapp.com          ; servidor SiTef
+  sitef_loja=00006320                      ; 8 caracteres
+  sitef_terminal=00000001                  ; 8 caracteres
+  sitef_param_adic=                        ; parametros adicionais (ver uTEFCliSiTef)
 
-  modo=http    -> POST JSON no TefGpAPI (exige TefGpAPI.exe no ar na porta 8000)
-  modo=arquivo -> padrao TEF Dedicado: grava intpos.001 na pasta Req e aguarda
-                  a resposta na pasta Resp, falando direto com o gerenciador
-                  Tef_Dial/GetPay (dispensa a API HTTP)
+  modo=http     -> POST JSON no TefGpAPI (exige TefGpAPI.exe no ar na porta 8000)
+  modo=arquivo  -> padrao TEF Dedicado: grava intpos.001 na pasta Req e aguarda
+                   a resposta na pasta Resp, falando direto com o gerenciador
+                   Tef_Dial/GetPay (dispensa a API HTTP)
+  modo=clisitef -> chama a CliSiTef32I.dll (SiTef/Fiserv) dentro do proprio
+                   PDV, sem gerenciador nenhum. A CliSiTef e' interativa: os
+                   menus, perguntas e coletas dela vao para a tela do PDV (ver
+                   TTEFInteracaoProc e uTEFCliSiTef.pas)
 
-  Os dois implementam ITEFClient e devolvem o mesmo TTEFResposta, entao o
+  Os tres implementam ITEFClient e devolvem o mesmo TTEFResposta, entao o
   restante do sistema (uBridge) nao enxerga diferenca.
 
   --------------------------------------------------------------------------
@@ -60,7 +69,7 @@ uses
   System.Generics.Collections, uConstantesWeb;
 
 type
-  TTEFModo = (tmHTTP, tmArquivo);
+  TTEFModo = (tmHTTP, tmArquivo, tmCliSiTef);
 
   // Onde o QR Code de um PIX via TEF e' apresentado ao cliente
   TTEFPixQr = (pqPinpad, pqTela);
@@ -69,6 +78,12 @@ type
   // idealmente antes do resultado, com a transacao ainda em curso. Corre na
   // THREAD DO TEF: quem assina precisa marshalar para a thread principal.
   TTEFQrCodeProc = reference to procedure(const APayload: string);
+
+  // modo=clisitef: mensagem, menu, pergunta ou coleta que a CliSiTef pede
+  // para mostrar ao operador, ja em JSON (campo 'tipo': mensagem | menu |
+  // simnao | campo | aviso | fim). Perguntas trazem 'id' e esperam a volta
+  // por ITEFClient.ResponderInteracao. Corre na THREAD DO TEF.
+  TTEFInteracaoProc = reference to procedure(const AJson: string);
 
   TTEFResposta = record
     Sucesso: Boolean;
@@ -115,13 +130,18 @@ type
     PixQr: TTEFPixQr;         // pinpad (padrao) | tela
     PixQrCampos: string;      // modo arquivo: 'auto' ou lista (ex: 950,133)
     PixQrChaves: string;      // modo http: 'auto' ou lista (ex: qrCode,emv)
+    SitefDll: string;         // modo clisitef: caminho da CliSiTef32I.dll
+    SitefIP: string;          // endereco do SiTef (ex: tls-prod.fiservapp.com)
+    SitefLoja: string;        // codigo da loja, 8 caracteres
+    SitefTerminal: string;    // codigo do terminal, 8 caracteres
+    SitefParamAdic: string;   // extras do ConfiguraIntSiTefInterativoEx
     function ModoTexto: string;
     function PixQrTexto: string;
     function Descricao: string;
   end;
 
   ITEFClient = interface
-    ['{7E3A9C21-4D58-4B0E-9E2F-6A1C3D5F8B04}']
+    ['{3B1F6E2A-8C47-4D19-A5E0-91C2D7F4B6A3}']
     function Transacionar(ADocFiscal: Integer; AValorTotal: Double;
       const ATipoTransacao, AParcelas: string): TTEFResposta;
     function Confirmar(ADocFiscal: Integer; const AControle: string): TTEFResposta;
@@ -140,6 +160,11 @@ type
     // Chamado da thread principal com Transacionar em curso na thread do TEF.
     // So sinaliza: quem desiste (ou nao) e' a propria espera da transacao.
     procedure SolicitarCancelamento;
+    // modo=clisitef: quem desenha os menus/coletas assina aqui
+    procedure SetOnInteracao(const AProc: TTEFInteracaoProc);
+    // Resposta da tela a uma pergunta (AId do JSON). AAcao: ok | cancelar |
+    // voltar. Chamado da thread principal; nos outros modos nao faz nada.
+    procedure ResponderInteracao(AId: Integer; const AAcao, AValor: string);
     property Identificacao: Integer read GetIdentificacao write SetIdentificacao;
   end;
 
@@ -160,6 +185,7 @@ type
     FOnQrCode: TTEFQrCodeProc;
     FQrNotificado: Boolean;   // um aviso por transacao (o .sts e' relido em loop)
     FCancelarEspera: Boolean; // SolicitarCancelamento (escrito na thread principal)
+    FOnInteracao: TTEFInteracaoProc;
     procedure Log(const AMsg: string); overload;
     procedure Log(const AFmt: string; const AArgs: array of const); overload;
     function MapearComando(const ATipoTransacao: string): string;
@@ -185,7 +211,9 @@ type
 
     procedure SetOnQrCode(const AProc: TTEFQrCodeProc);
     function PixQrNaTela: Boolean;
-    procedure SolicitarCancelamento;
+    procedure SolicitarCancelamento; virtual;
+    procedure SetOnInteracao(const AProc: TTEFInteracaoProc);
+    procedure ResponderInteracao(AId: Integer; const AAcao, AValor: string); virtual;
 
     function GetIdentificacao: Integer;
     procedure SetIdentificacao(AValue: Integer);
@@ -312,7 +340,7 @@ function CriarTEFClient(const AConfig: TTEFConfig): ITEFClient;
 implementation
 
 uses
-  uTEFLog;
+  uTEFLog, uTEFCliSiTef;
 
 const
   // Arquivos do intercambio (padrao TEF Dedicado)
@@ -396,6 +424,8 @@ function TEFModoFromString(const AValor: string): TTEFModo;
 begin
   if SameText(Trim(AValor), 'arquivo') then
     Result := tmArquivo
+  else if SameText(Trim(AValor), 'clisitef') then
+    Result := tmCliSiTef
   else
     Result := tmHTTP;
 end;
@@ -425,6 +455,7 @@ function CriarTEFClient(const AConfig: TTEFConfig): ITEFClient;
 begin
   case AConfig.Modo of
     tmArquivo: Result := TTEFClientArquivo.Create(AConfig);
+    tmCliSiTef: Result := TTEFClientCliSiTef.Create(AConfig);
   else
     Result := TTEFClientHTTP.Create(AConfig);
   end;
@@ -434,10 +465,12 @@ end;
 
 function TTEFConfig.ModoTexto: string;
 begin
-  if Modo = tmArquivo then
-    Result := 'arquivo'
+  case Modo of
+    tmArquivo: Result := 'arquivo';
+    tmCliSiTef: Result := 'clisitef';
   else
     Result := 'http';
+  end;
 end;
 
 function TTEFConfig.PixQrTexto: string;
@@ -450,10 +483,13 @@ end;
 
 function TTEFConfig.Descricao: string;
 begin
-  if Modo = tmArquivo then
-    Result := Format('arquivo (req=%s resp=%s)', [PastaReq, PastaResp])
+  case Modo of
+    tmArquivo: Result := Format('arquivo (req=%s resp=%s)', [PastaReq, PastaResp]);
+    tmCliSiTef: Result := Format('clisitef (%s loja=%s terminal=%s)',
+      [SitefIP, SitefLoja, SitefTerminal]);
   else
     Result := Format('http (%s)', [Url]);
+  end;
   Result := Result + Format(' | QR PIX: %s', [PixQrTexto]);
 end;
 
@@ -495,6 +531,17 @@ procedure TTEFClientBase.SolicitarCancelamento;
 begin
   FCancelarEspera := True;
   Log('cancelamento solicitado pelo operador');
+end;
+
+procedure TTEFClientBase.SetOnInteracao(const AProc: TTEFInteracaoProc);
+begin
+  FOnInteracao := AProc;
+end;
+
+// So o modo clisitef pergunta coisas ao operador; os gerenciadores (http e
+// arquivo) desenham os proprios menus
+procedure TTEFClientBase.ResponderInteracao(AId: Integer; const AAcao, AValor: string);
+begin
 end;
 
 procedure TTEFClientBase.ReiniciarQrCode;

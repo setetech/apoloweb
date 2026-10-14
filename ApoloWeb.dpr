@@ -21,6 +21,7 @@ uses
   uWebAssets in 'uWebAssets.pas',
   uSyncLog in 'uSyncLog.pas',
   uTEFLog in 'uTEFLog.pas',
+  uTEFCliSiTef in 'uTEFCliSiTef.pas',
   uUploadWorker in 'uUploadWorker.pas';
 
 {$R *.res}

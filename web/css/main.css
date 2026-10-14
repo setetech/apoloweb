@@ -474,6 +474,60 @@ input::placeholder { color: var(--text-muted); }
   margin-top: 1rem;
 }
 
+/* ===== TEF INTERATIVO (modal-tef-interacao, modo=clisitef) ===== */
+.tefi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 140px;
+}
+.tefi-cabecalho {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: pre-line;
+}
+.tefi-mensagem {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: pre-line;
+}
+.tefi-cliente {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: pre-line;
+}
+.tefi-espera {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
+}
+.tefi-titulo {
+  margin: 0.3rem 0 0 0;
+  font-size: 1.05rem;
+  white-space: pre-line;
+}
+.tefi-opcoes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.tefi-opcao {
+  text-align: left;
+  justify-content: flex-start;
+  width: 100%;
+}
+.tefi-opcao:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
 /* Legenda de atalhos dentro de um painel de pagamento */
 .pay-hint {
   margin: 0.9rem 0 0 0;

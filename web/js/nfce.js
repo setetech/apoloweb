@@ -570,6 +570,9 @@ const TEFConfig = {
       .addEventListener('click', () => this.testar());
     document.getElementById('btn-tef-recarregar')
       .addEventListener('click', () => this.carregar());
+    // Outra DLL = outra pasta de kit: mostra os arquivos dela
+    document.getElementById('tef-sitef-dll')
+      .addEventListener('change', () => this.carregarKit());
   },
 
   async carregar() {
@@ -587,6 +590,12 @@ const TEFConfig = {
     document.getElementById('tef-pix-qr').value = d.pixQr || 'pinpad';
     document.getElementById('tef-pix-qr-campos').value = d.pixQrCampos || 'auto';
     document.getElementById('tef-pix-qr-chaves').value = d.pixQrChaves || 'auto';
+    document.getElementById('tef-sitef-dll').value = d.sitefDll || '';
+    document.getElementById('tef-sitef-ip').value = d.sitefIp || '';
+    document.getElementById('tef-sitef-loja').value = d.sitefLoja || '';
+    document.getElementById('tef-sitef-terminal').value = d.sitefTerminal || '';
+    document.getElementById('tef-sitef-param').value = d.sitefParamAdic || '';
+    this._mostrarKit(d.kit);
 
     this._aplicarModo();
     this._status(d.ativo
@@ -594,14 +603,17 @@ const TEFConfig = {
       : `TEF desligado. As alteracoes vao para ${d.arquivoIni}`);
   },
 
-  // So mostra os campos do modo escolhido: url no http, pastas no arquivo.
-  // Os campos/chaves do BR Code so interessam com o QR na tela.
+  // So mostra os campos do modo escolhido: url no http, pastas no arquivo,
+  // DLL/loja/terminal no clisitef. Os campos/chaves do BR Code so interessam
+  // com o QR na tela.
   _aplicarModo() {
-    const arquivo = document.getElementById('tef-modo').value === 'arquivo';
+    const modo = document.getElementById('tef-modo').value;
     document.querySelectorAll('#nfce-tef .tef-so-http')
-      .forEach(el => el.classList.toggle('hidden', arquivo));
+      .forEach(el => el.classList.toggle('hidden', modo !== 'http'));
     document.querySelectorAll('#nfce-tef .tef-so-arquivo')
-      .forEach(el => el.classList.toggle('hidden', !arquivo));
+      .forEach(el => el.classList.toggle('hidden', modo !== 'arquivo'));
+    document.querySelectorAll('#nfce-tef .tef-so-clisitef')
+      .forEach(el => el.classList.toggle('hidden', modo !== 'clisitef'));
 
     const qrTela = document.getElementById('tef-pix-qr').value === 'tela';
     document.querySelectorAll('#nfce-tef .tef-so-qr-tela')
@@ -619,21 +631,35 @@ const TEFConfig = {
       debug: document.getElementById('tef-debug').checked,
       pixQr: document.getElementById('tef-pix-qr').value,
       pixQrCampos: document.getElementById('tef-pix-qr-campos').value.trim() || 'auto',
-      pixQrChaves: document.getElementById('tef-pix-qr-chaves').value.trim() || 'auto'
+      pixQrChaves: document.getElementById('tef-pix-qr-chaves').value.trim() || 'auto',
+      sitefDll: document.getElementById('tef-sitef-dll').value.trim(),
+      sitefIp: document.getElementById('tef-sitef-ip').value.trim(),
+      sitefLoja: document.getElementById('tef-sitef-loja').value.trim(),
+      sitefTerminal: document.getElementById('tef-sitef-terminal').value.trim(),
+      sitefParamAdic: document.getElementById('tef-sitef-param').value.trim()
     };
   },
 
   async salvar() {
-    const resp = await Bridge.salvarParametrosTEF(this._dados());
+    const dados = this._dados();
+    const clisitef = dados.modo === 'clisitef';
+    // Token errado barra antes de gravar qualquer coisa
+    if (clisitef && !this._tokenValido()) return;
+
+    const resp = await Bridge.salvarParametrosTEF(dados);
     if (!resp) return;
 
     // Bridge.call ja mostra o Toast de erro; aqui so fixa o motivo na tela
-    if (resp.sucesso) {
-      Toast.success(resp.mensagem);
-      await this.carregar();
-    } else {
+    if (!resp.sucesso) {
       this._status(resp.mensagem, true);
+      return;
     }
+
+    // clisitef: porta do pinpad, trace e TLS vao para os arquivos do kit
+    if (clisitef && !(await this.salvarKit())) return;
+
+    Toast.success(resp.mensagem);
+    await this.carregar();
   },
 
   async testar() {
@@ -651,6 +677,70 @@ const TEFConfig = {
     this._status(texto, !online);
     if (online) Toast.success('Gerenciador TEF respondeu');
     else Toast.warning('Gerenciador TEF nao respondeu');
+  },
+
+  // ---------- Kit CliSiTef (CliSiTef.ini / CONFITLS.INI) ----------
+
+  async carregarKit() {
+    const dll = document.getElementById('tef-sitef-dll').value.trim();
+    const resp = await Bridge.lerKitCliSiTef(dll);
+    if (resp && resp.sucesso) this._mostrarKit(resp.dados);
+  },
+
+  _mostrarKit(k) {
+    const el = document.getElementById('tef-kit-status');
+    if (!k) { el.textContent = ''; return; }
+
+    const partes = [];
+    if (!k.dllExiste) partes.push('DLL nao encontrada');
+    else partes.push(k.versao || 'CliSiTef32I.dll');
+    partes.push(k.iniExiste ? 'CliSiTef.ini ok' : 'sem CliSiTef.ini');
+    if (k.tlsExiste) {
+      partes.push('CONFITLS.INI ok' + (k.tokenConfigurado ? ', token configurado' : ', SEM token'));
+    } else {
+      partes.push('sem CONFITLS.INI');
+    }
+    el.textContent = (k.pasta ? k.pasta + ' - ' : '') + partes.join(' | ');
+    el.classList.toggle('cfg-status-erro', !k.dllExiste || (k.tlsExiste && !k.tokenConfigurado));
+
+    document.getElementById('tef-kit-porta').value = k.portaPinPad || '';
+    document.getElementById('tef-kit-trace').checked = !!k.trace;
+    document.getElementById('tef-kit-tls-url').value = k.tlsUrl || '';
+    const token = document.getElementById('tef-kit-token');
+    token.value = '';
+    token.placeholder = k.tokenConfigurado
+      ? 'configurado - deixe em branco para manter'
+      : '0000-0000-0000-0000';
+  },
+
+  _tokenValido() {
+    const token = document.getElementById('tef-kit-token').value.trim();
+    if (token && !/^\d{4}-\d{4}-\d{4}-\d{4}$/.test(token)) {
+      Toast.warning('O token deve ter o formato 0000-0000-0000-0000');
+      return false;
+    }
+    return true;
+  },
+
+  // Devolve true se gravou
+  async salvarKit() {
+    if (!this._tokenValido()) return false;
+    const token = document.getElementById('tef-kit-token').value.trim();
+    const resp = await Bridge.salvarKitCliSiTef({
+      dll: document.getElementById('tef-sitef-dll').value.trim(),
+      portaPinPad: document.getElementById('tef-kit-porta').value.trim(),
+      trace: document.getElementById('tef-kit-trace').checked,
+      tlsUrl: document.getElementById('tef-kit-tls-url').value.trim(),
+      token: token
+    });
+    if (!resp) return false;
+    if (resp.sucesso) {
+      this._mostrarKit(resp.dados);
+      return true;
+    }
+    document.getElementById('tef-kit-status').textContent = resp.mensagem;
+    document.getElementById('tef-kit-status').classList.add('cfg-status-erro');
+    return false;
   },
 
   _status(texto, erro = false) {
@@ -679,7 +769,10 @@ const TEFAdm = {
   // O ADM devolve o controle so quando o operador sai do menu do gerenciador,
   // por isso o resultado chega depois, por 'tefAdmResultado'.
   async abrirMenu() {
-    this._status('Menu administrativo aberto no gerenciador. Conclua a operacao na tela dele...');
+    // clisitef: nao ha gerenciador - o menu do SiTef vem para a tela do PDV
+    this._status(Payment._tefInterativo
+      ? 'Menu administrativo do SiTef aberto. Siga as opcoes na tela...'
+      : 'Menu administrativo aberto no gerenciador. Conclua a operacao na tela dele...');
     const resp = await Bridge.administracaoTEF();
     if (!resp || !resp.sucesso) {
       this._status(resp ? resp.mensagem : 'Falha ao abrir o menu administrativo', true);

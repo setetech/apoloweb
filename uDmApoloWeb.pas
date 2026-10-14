@@ -407,10 +407,11 @@ begin
     UniConnOracle.LoginPrompt := False;
     If Pos(':',UniConnOracle.Server)>0 Then
       UniConnOracle.SpecificOptions.Values['Direct']:='True';
-    // TEF - dois modos de integracao:
-    //   modo=http    -> POST JSON no TefGpAPI (url)
-    //   modo=arquivo -> intercambio intpos.001/intpos.sts nas pastas Req/Resp
-    //                   do gerenciador Tef_Dial/GetPay (dispensa a API HTTP)
+    // TEF - tres modos de integracao:
+    //   modo=http     -> POST JSON no TefGpAPI (url)
+    //   modo=arquivo  -> intercambio intpos.001/intpos.sts nas pastas Req/Resp
+    //                    do gerenciador Tef_Dial/GetPay (dispensa a API HTTP)
+    //   modo=clisitef -> CliSiTef32I.dll direto no processo (sitef_*)
     FTEFHabilitado := ini.ReadBool('TEF','habilitado', False);
     FTEFUrl := ini.ReadString('TEF','url', TEF_URL_PADRAO);
 
@@ -430,6 +431,13 @@ begin
                                  ini.ReadString('TEF','pix_qr', TEF_PIX_QR_PADRAO));
     FTEFConfig.PixQrCampos  := ini.ReadString('TEF','pix_qr_campos', TEF_PIX_QR_AUTO);
     FTEFConfig.PixQrChaves  := ini.ReadString('TEF','pix_qr_chaves', TEF_PIX_QR_AUTO);
+
+    // modo=clisitef: DLL do SiTef e os parametros do ConfiguraIntSiTefInterativo
+    FTEFConfig.SitefDll       := ini.ReadString('TEF','sitef_dll', TEF_SITEF_DLL_PADRAO);
+    FTEFConfig.SitefIP        := ini.ReadString('TEF','sitef_ip', TEF_SITEF_IP_PADRAO);
+    FTEFConfig.SitefLoja      := ini.ReadString('TEF','sitef_loja', '');
+    FTEFConfig.SitefTerminal  := ini.ReadString('TEF','sitef_terminal', '');
+    FTEFConfig.SitefParamAdic := ini.ReadString('TEF','sitef_param_adic', '');
 
     // Impressao do cupom (DANFCe)
     //   modo=SUMATRA : gera PDF e imprime via SumatraPDF (fallback PrintCupon)

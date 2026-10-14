@@ -354,6 +354,21 @@ const Bridge = {
     return this.call('consultarStatusTEF', {});
   },
 
+  // [TEF] modo=clisitef: resposta a um menu/pergunta/coleta da CliSiTef
+  // ({id, acao: ok|cancelar|voltar, valor}). id 0 = desistir sem pergunta.
+  async responderTEF(dados) {
+    return this.call('responderTEF', dados);
+  },
+
+  // [TEF] modo=clisitef: CliSiTef.ini / CONFITLS.INI da pasta da DLL
+  async lerKitCliSiTef(dll) {
+    return this.call('lerKitCliSiTef', { dll });
+  },
+
+  async salvarKitCliSiTef(dados) {
+    return this.call('salvarKitCliSiTef', dados);
+  },
+
   // TEF - parametrizacao (aba TEF do modal de documentos fiscais)
   async obterParametrosTEF() {
     return this.call('obterParametrosTEF', {});

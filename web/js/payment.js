@@ -35,6 +35,7 @@ const Payment = {
   _tefWatchdog: null,      // destrava a tela se o tefResultado nunca chegar
   _tefAguardando: false,   // spinner do TEF na tela (transacao no ar)
   _tefCancelando: false,   // dialogo/pedido de cancelamento em curso
+  _tefInterativo: false,   // [TEF] modo=clisitef: menus/coletas na tela do PDV
 
   init() {
     this._bindTabs();
@@ -261,6 +262,7 @@ const Payment = {
       if (resp && resp.sucesso && resp.dados) {
         this.aplicarConfigTEF(resp.dados.tefHabilitado, resp.dados.tefPixQrTela);
         if (resp.dados.tefTimeout > 0) this._tefTimeoutSeg = resp.dados.tefTimeout;
+        this._tefInterativo = !!resp.dados.tefInterativo;
       }
     } catch (e) {
       // Falha silenciosa - TEF sera configurado pelo push do Delphi
@@ -1004,17 +1006,7 @@ const Payment = {
     // (que nao fecha no ESC) preso para sempre.
     clearTimeout(this._tefWatchdog);
     this._tefWatchdog = null;
-    if (show) {
-      this._tefWatchdog = setTimeout(() => {
-        this._tefWatchdog = null;
-        this._showTEFAguardando(false);
-        this._fecharTEFPixQr();
-        this._tefTipoEmCurso = null;
-        Toast.error('Sem resposta do TEF. Confira no gerenciador/pinpad se o ' +
-          'pagamento foi aprovado antes de repetir.');
-        this.atualizarResumo();
-      }, (this._tefTimeoutSeg + 60) * 1000);
-    }
+    if (show) this._armarWatchdogTEF();
 
     const indicator = document.getElementById('tef-aguardando');
     if (indicator) {
@@ -1025,6 +1017,26 @@ const Payment = {
     const btnFinish = document.getElementById('btn-pay-finish');
     if (btnAdd) btnAdd.disabled = show;
     if (btnFinish) btnFinish.disabled = show;
+  },
+
+  _armarWatchdogTEF() {
+    clearTimeout(this._tefWatchdog);
+    this._tefWatchdog = setTimeout(() => {
+      this._tefWatchdog = null;
+      this._showTEFAguardando(false);
+      this._fecharTEFPixQr();
+      if (typeof TEFInterativo !== 'undefined') TEFInterativo.fechar();
+      this._tefTipoEmCurso = null;
+      Toast.error('Sem resposta do TEF. Confira no gerenciador/pinpad se o ' +
+        'pagamento foi aprovado antes de repetir.');
+      this.atualizarResumo();
+    }, (this._tefTimeoutSeg + 60) * 1000);
+  },
+
+  // modo=clisitef: menus e coletas podem somar mais que o [TEF] timeout;
+  // cada evento da CliSiTef rearma o relogio
+  _reiniciarWatchdogTEF() {
+    if (this._tefAguardando) this._armarWatchdogTEF();
   },
 
   // Operador desistiu da transacao (botao ou ESC). O Delphi retira a venda se
