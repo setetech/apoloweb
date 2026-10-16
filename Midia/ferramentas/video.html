@@ -1,0 +1,1200 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8"></head><body><style>
+body.video{margin:0;padding:0;width:1920px;height:1080px;overflow:hidden;background:var(--asfalto)}
+body.video .pag{max-width:none;width:1920px;height:1080px;display:block;gap:0}
+body.video header.cab,body.video h3.sec,body.video .roteiro,body.video .rodape,body.video .controles{display:none}
+body.video .player{position:absolute;left:192px;top:22px;width:1536px;border-radius:18px}
+body.video .palco{width:1536px;height:864px}
+body.video .legenda{padding:20px 30px 18px;gap:24px}
+body.video .legenda .num{font-size:15px}
+body.video .legenda h2{font-size:36px;margin:8px 0 6px}
+body.video .legenda p{font-size:21px;line-height:1.45;max-width:none}
+body.video .legenda .rot{font-size:16px}
+#vbar{position:absolute;left:0;bottom:0;height:6px;width:0;background:var(--rota)}
+/* ?avatar=1 — palco à esquerda; coluna à direita com o índice e o quadro do apresentador (o vídeo do
+   HeyGen é sobreposto pelo ffmpeg exatamente em #avatarCard; veja montar.js) */
+#coluna{display:none}
+body.video.com-avatar .player{left:40px;height:1042px}
+body.video.com-avatar #coluna{display:flex;flex-direction:column;position:absolute;left:1600px;top:22px;width:296px;height:1042px;gap:14px}
+#coluna .marca{font:500 13px/1.3 var(--f-dado);letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);padding:14px 4px 0}
+#coluna .marca b{display:block;margin-top:8px;font:750 30px/1.05 var(--f-display);font-stretch:85%;letter-spacing:0;text-transform:none;color:var(--tinta)}
+#coluna ol{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+#coluna li{font:500 15px/1.3 var(--f-texto);color:var(--mudo);padding:6px 10px;border-left:3px solid transparent;border-radius:0 8px 8px 0}
+#coluna li.feito{color:var(--tinta);opacity:.55}
+#coluna li.atual{color:var(--tinta);font-weight:600;border-left-color:var(--rota);background:var(--painel)}
+#avatarCard{margin-top:auto;height:400px;flex:none;border-radius:18px;background:var(--painel2);border:1px solid var(--linha)}
+</style><title>ApoloWeb: a frente de caixa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: um "palco" 16:9 em SVG (escala sozinho) + legenda narrada + roteiro em capítulos abaixo.
+   Linguagem visual do mundo do vendedor externo: asfalto, traçado de rota em âmbar, pinos, sinais. */
+:root{
+  --asfalto:#f2f5f7; --painel:#ffffff; --painel2:#e8eef2; --linha:#cfd9e0;
+  --tinta:#13202b; --mudo:#5a6b78; --rota:#c47712; --rota-suave:#f6dcb4;
+  --ok:#1f8f57; --alerta:#c4432c; --azul:#1f78b8; --aviso:#b8860b;
+  --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-texto:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-dado:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-tema]){
+  --asfalto:#0e161e; --painel:#152029; --painel2:#1b2833; --linha:#2b3b48;
+  --tinta:#e7edf2; --mudo:#8e9fad; --rota:#f2a93b; --rota-suave:#4a3517;
+  --ok:#3fbf7f; --alerta:#e8674c; --azul:#4aa3df; --aviso:#e3b341; color-scheme:dark}}
+:root[data-theme="dark"]:not([data-tema]){
+  --asfalto:#0e161e; --painel:#152029; --painel2:#1b2833; --linha:#2b3b48;
+  --tinta:#e7edf2; --mudo:#8e9fad; --rota:#f2a93b; --rota-suave:#4a3517;
+  --ok:#3fbf7f; --alerta:#e8674c; --azul:#4aa3df; --aviso:#e3b341; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--asfalto);color:var(--tinta);font:16px/1.55 var(--f-texto);padding-inline:16px;padding-block:24px 48px}
+.pag{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+header.cab{display:flex;flex-direction:column;gap:6px}
+.olho{font:500 12px/1 var(--f-dado);letter-spacing:.12em;text-transform:uppercase;color:var(--rota)}
+h1{margin:0;font:800 clamp(30px,5vw,52px)/1.02 var(--f-display);font-stretch:80%;letter-spacing:-.01em;text-wrap:balance}
+.lead{margin:0;color:var(--mudo);max-width:64ch}
+
+/* ---- player ---- */
+.player{background:var(--painel);border:1px solid var(--linha);border-radius:14px;overflow:hidden}
+.palco{position:relative;aspect-ratio:16/9;max-width:100%;background:var(--painel2)}
+.palco svg.cena{position:absolute;inset:0;width:100%;height:100%;opacity:0;visibility:hidden;transition:opacity .45s ease}
+.palco svg.cena.ativa{opacity:1;visibility:visible}
+.legenda{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start;padding:16px 20px 6px}
+.legenda .num{font:500 12px/1 var(--f-dado);letter-spacing:.1em;text-transform:uppercase;color:var(--mudo)}
+.legenda h2{margin:6px 0 4px;font:750 clamp(20px,2.6vw,28px)/1.1 var(--f-display);font-stretch:85%;text-wrap:balance}
+.legenda p{margin:0;max-width:70ch;color:var(--tinta)}
+.legenda .rot{font:500 12px/1.3 var(--f-dado);color:var(--rota);white-space:nowrap;padding-top:2px}
+.controles{display:flex;align-items:center;gap:10px;padding:12px 20px 16px;flex-wrap:wrap}
+.btn{font:600 14px/1 var(--f-texto);color:var(--tinta);background:var(--painel2);border:1px solid var(--linha);border-radius:999px;padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.btn:hover{border-color:var(--rota)}
+.btn:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.btn.prim{background:var(--rota);border-color:var(--rota);color:#1a1206}
+.trilho{flex:1;min-width:160px;display:flex;gap:4px}
+.trilho button{flex:1;height:8px;border:0;border-radius:4px;background:var(--linha);cursor:pointer;padding:0;position:relative;overflow:hidden}
+.trilho button i{position:absolute;inset:0;width:0;background:var(--rota)}
+.trilho button.feito i{width:100%}
+.trilho button:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.tempo{font:500 12px/1 var(--f-dado);color:var(--mudo);font-variant-numeric:tabular-nums}
+
+/* ---- roteiro ---- */
+.roteiro{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.cap{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;text-align:left;background:var(--painel);border:1px solid var(--linha);border-radius:10px;padding:12px 14px;cursor:pointer;color:var(--tinta);font:inherit}
+.cap:hover,.cap.atual{border-color:var(--rota)}
+.cap:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.cap b{grid-row:span 2;font:800 22px/1 var(--f-display);font-stretch:75%;color:var(--rota);font-variant-numeric:tabular-nums;padding-top:2px}
+.cap strong{font:600 15px/1.25 var(--f-texto)}
+.cap span{font-size:13.5px;color:var(--mudo);line-height:1.45}
+h3.sec{margin:6px 0 0;font:750 20px/1.2 var(--f-display);font-stretch:85%}
+.rodape{font-size:13px;color:var(--mudo);max-width:72ch}
+
+/* ---- SVG: elementos comuns ---- */
+svg text{font-family:var(--f-texto);fill:var(--tinta)}
+.t-disp{font-family:var(--f-display);font-weight:800;font-stretch:80%}
+.t-dado{font-family:var(--f-dado);font-weight:500}
+.f-painel{fill:var(--painel)} .f-painel2{fill:var(--painel2)} .s-linha{stroke:var(--linha)}
+.f-rota{fill:var(--rota)} .s-rota{stroke:var(--rota)} .f-ok{fill:var(--ok)} .s-ok{stroke:var(--ok)}
+.f-alerta{fill:var(--alerta)} .s-alerta{stroke:var(--alerta)} .f-azul{fill:var(--azul)} .s-azul{stroke:var(--azul)}
+.f-mudo{fill:var(--mudo)} .f-aviso{fill:var(--aviso)} .f-linha{fill:var(--linha)} .f-suave{fill:var(--rota-suave)}
+.sem-fill{fill:none}
+.tx-mudo{fill:var(--mudo)} .tx-escuro{fill:#1a1206} .tx-claro{fill:#ffffff}
+
+/* animações disparam quando a cena fica ativa (.ativa) */
+.cena *{transform-box:fill-box}
+.ativa .surge{animation:surge .6s cubic-bezier(.2,.8,.2,1) both}
+.ativa .cai{animation:cai .55s cubic-bezier(.2,.9,.3,1.2) both;transform-origin:center}
+.ativa .cresce{animation:cresce 1s cubic-bezier(.2,.8,.2,1) both;transform-origin:left center}
+.ativa .sobe{animation:sobe 1s cubic-bezier(.2,.8,.2,1) both;transform-origin:center bottom}
+.ativa .traco{stroke-dasharray:var(--len,1200);stroke-dashoffset:var(--len,1200);animation:traco var(--dur,2.2s) ease-in-out both}
+.ativa .pulso{animation:pulso 1.6s ease-in-out infinite;transform-origin:center}
+.ativa .gira{animation:gira 2.4s cubic-bezier(.3,.7,.2,1) both;transform-origin:50% 100%}
+.ativa .anda{animation:anda 2.2s cubic-bezier(.5,0,.3,1) both}
+.ativa .anel{animation:anel 1.8s ease-out infinite;transform-origin:center}
+.ativa .pisca{animation:pisca .9s ease-in-out 3 both}
+@keyframes surge{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes cai{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:none}}
+@keyframes cresce{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes sobe{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes traco{to{stroke-dashoffset:0}}
+@keyframes pulso{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+@keyframes gira{from{transform:rotate(-90deg)}to{transform:rotate(var(--ang,40deg))}}
+@keyframes anda{0%{opacity:0;transform:translate(0,0)}15%{opacity:1}100%{opacity:1;transform:translate(var(--dx,300px),var(--dy,0px))}}
+@keyframes anel{0%{opacity:.7;transform:scale(.3)}100%{opacity:0;transform:scale(1.6)}}
+@keyframes pisca{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){
+  .ativa .surge,.ativa .cai,.ativa .cresce,.ativa .sobe,.ativa .traco,.ativa .pulso,.ativa .gira,.ativa .anda,.ativa .anel,.ativa .pisca{animation-duration:.01s!important;animation-delay:0s!important;animation-iteration-count:1!important}
+  .palco svg.cena{transition:none}
+}
+@media (max-width:620px){
+  .legenda{grid-template-columns:minmax(0,1fr)}
+  .legenda .rot{white-space:normal}
+  .controles{padding-inline:14px}
+}
+</style>
+
+<style id="temas-colosso">
+/* ===== Temas do Colosso ====================================================================
+   O seletor (#selTema) usa os MESMOS 17 temas das rotinas web (escuro, claro, floresta, sazonais e o
+   automático pela época do ano). themes.css e temas.js abaixo são CÓPIAS SEM ALTERAÇÃO de
+   colosso-delphi-webview/assets/Web — se o tema mudar lá, recopie aqui.
+   Cada tema define --bg/--panel/--txt/--accent...; a regra :root[data-tema] liga essas cores às variáveis
+   das cenas, então as classes f-rota, f-ok, tx-mudo etc. seguem o tema sem mexer em cena nenhuma.
+   ?tema=<id> na URL fixa o tema; no modo de gravação (?video=1) o padrão é "escuro" (o automático muda
+   com a data e o vídeo tem de sair igual sempre). */
+:root[data-tema]{
+  --asfalto:var(--bg); --painel:var(--panel); --painel2:var(--panel2); --linha:var(--line);
+  --tinta:var(--txt); --mudo:var(--muted); --rota:var(--accent); --rota-suave:color-mix(in srgb,var(--accent) 24%,var(--panel));
+  --alerta:var(--err); --azul:var(--accent2); --aviso:var(--warn);
+}
+.cab-topo{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sel-tema{font:500 13px/1.2 var(--f-texto);color:var(--tinta);background:var(--painel);border:1px solid var(--linha);border-radius:999px;padding:7px 12px;cursor:pointer;max-width:240px}
+.sel-tema:hover{border-color:var(--rota)}
+.sel-tema:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.olho::after{content:var(--tema-emoji,'');margin-left:8px;letter-spacing:0}
+/* ---- themes.css (cópia) ---- */
+/* ===========================================================================
+   themes.css — temas de cores COMPARTILHADOS das rotinas web Colosso.
+
+   Origem: ROT8010 (BI). Arquivo idêntico em todas as rotinas geradas pela
+   skill colosso-delphi-webview — se editar aqui, replique nas demais (ou
+   atualize o asset da skill, que é a fonte da verdade).
+
+   Cada tema redefine as variáveis CSS de styles.css via html[data-tema="..."]
+   e ainda define:
+     --chart-palette : cores para gráficos multi-série
+     --grafico       : cor principal de gráficos de série única
+     --tema-emoji    : enfeite ao lado do título da rotina
+   O seletor (#selTema) e a persistência ficam em temas.js; a escolha usa a
+   chave localStorage 'colosso.tema', compartilhada entre as rotinas via
+   pasta de dados única do WebView2 ('ColossoWebView').
+   =========================================================================== */
+
+.brand::after{content:var(--tema-emoji,'');margin-left:8px}
+
+/* ---------- ESCURO (padrão — igual ao :root de styles.css) ---------------- */
+html[data-tema="escuro"]{
+  --bg:#0f1419; --panel:#1a2129; --panel2:#222c36; --line:#2d3a46;
+  --txt:#e6edf3; --muted:#8b97a3; --accent:#f2b705; --accent2:#3aa6ff;
+  --ok:#37c871; --warn:#ff9f40; --err:#ff6b6b;
+  --chart-palette:#3aa6ff,#f2b705,#37c871,#ff9f40,#b57bff,#ff6b8a,#4dd8d2,#c8d637,#ff8355,#7f96ff;
+  --grafico:#2b96f5;
+  --tema-emoji:'';
+}
+
+/* ---------- CLARO ---------------------------------------------------------- */
+html[data-tema="claro"]{
+  --bg:#f2f4f7; --panel:#ffffff; --panel2:#e9edf2; --line:#d4dbe3;
+  --txt:#1c2733; --muted:#64748b; --accent:#d97706; --accent2:#2563eb;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#2563eb,#f59e0b,#16a34a,#db2777,#7c3aed,#0891b2,#dc2626,#65a30d,#ea580c,#4f46e5;
+  --grafico:#2563eb;
+  --tema-emoji:'';
+}
+html[data-tema="claro"] .btn-primario,
+html[data-tema="claro"] button.primario{color:#fff}
+
+/* ---------- FLORESTA ------------------------------------------------------- */
+html[data-tema="floresta"]{
+  --bg:#0d1710; --panel:#14231a; --panel2:#1c3024; --line:#2b4a36;
+  --txt:#e4f0e6; --muted:#8fa898; --accent:#a3e635; --accent2:#34d399;
+  --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+  --chart-palette:#34d399,#a3e635,#fbbf24,#5eead4,#86efac,#d9f99d,#f59e0b,#4ade80,#a7f3d0,#bef264;
+  --grafico:#34d399;
+  --tema-emoji:'🌲';
+}
+html[data-tema="floresta"] body{
+  background:radial-gradient(1200px 500px at 85% -10%, rgba(52,211,153,.08), transparent 60%), var(--bg);
+}
+
+/* ---------- FLORIDO -------------------------------------------------------- */
+html[data-tema="florido"]{
+  --bg:#fdf2f6; --panel:#ffffff; --panel2:#fce7f0; --line:#f3cede;
+  --txt:#4a2537; --muted:#a06880; --accent:#db2777; --accent2:#c026d3;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#db2777,#9d4edd,#f472b6,#fb923c,#22c55e,#38bdf8,#e879f9,#facc15,#fb7185,#a78bfa;
+  --grafico:#db2777;
+  --tema-emoji:'🌸';
+}
+html[data-tema="florido"] body{
+  background:radial-gradient(900px 400px at 10% -10%, rgba(219,39,119,.07), transparent 60%),
+             radial-gradient(900px 400px at 95% 110%, rgba(157,78,221,.07), transparent 60%), var(--bg);
+}
+html[data-tema="florido"] .btn-primario,
+html[data-tema="florido"] button.primario{color:#fff}
+
+/* ---------- OCEANO --------------------------------------------------------- */
+html[data-tema="oceano"]{
+  --bg:#071825; --panel:#0c2436; --panel2:#123048; --line:#1e4460;
+  --txt:#e0f2fe; --muted:#7fa8c1; --accent:#22d3ee; --accent2:#38bdf8;
+  --ok:#34d399; --warn:#fbbf24; --err:#fb7185;
+  --chart-palette:#38bdf8,#22d3ee,#818cf8,#34d399,#67e8f9,#0ea5e9,#a5b4fc,#2dd4bf,#7dd3fc,#6366f1;
+  --grafico:#38bdf8;
+  --tema-emoji:'🌊';
+}
+html[data-tema="oceano"] body{
+  background:linear-gradient(180deg, rgba(56,189,248,.05), transparent 300px), var(--bg);
+}
+
+/* ---------- CAFÉ ----------------------------------------------------------- */
+html[data-tema="cafe"]{
+  --bg:#1a120c; --panel:#241a12; --panel2:#2f2318; --line:#46362a;
+  --txt:#f0e6dc; --muted:#a89482; --accent:#e9c46a; --accent2:#d4a373;
+  --ok:#84cc16; --warn:#f4a261; --err:#e76f51;
+  --chart-palette:#d4a373,#e9c46a,#f4a261,#e76f51,#a98467,#ccd5ae,#bc6c25,#dda15e,#faedcd,#b08968;
+  --grafico:#d4a373;
+  --tema-emoji:'☕';
+}
+
+/* ======================= TEMÁTICOS / SAZONAIS ============================= */
+
+/* ---------- NATAL ---------------------------------------------------------- */
+html[data-tema="natal"]{
+  --bg:#0b1f14; --panel:#103322; --panel2:#16402b; --line:#245a3c;
+  --txt:#f2fbf4; --muted:#93b8a0; --accent:#ef4444; --accent2:#f8d24a;
+  --ok:#22c55e; --warn:#fb923c; --err:#f87171;
+  --chart-palette:#ef4444,#f8d24a,#22c55e,#f8fafc,#16a34a,#fca5a5,#fde68a,#86efac,#dc2626,#eab308;
+  --grafico:#ef4444;
+  --tema-emoji:'🎄';
+}
+html[data-tema="natal"] body{
+  background:radial-gradient(700px 300px at 15% -5%, rgba(239,68,68,.10), transparent 60%),
+             radial-gradient(700px 300px at 85% -5%, rgba(248,210,74,.10), transparent 60%), var(--bg);
+}
+html[data-tema="natal"] .btn-primario,
+html[data-tema="natal"] button.primario{color:#3a2503}
+
+/* ---------- ANO NOVO ------------------------------------------------------- */
+html[data-tema="ano-novo"]{
+  --bg:#0c0a14; --panel:#161226; --panel2:#1f1a33; --line:#332b52;
+  --txt:#f4f1ff; --muted:#9d95b8; --accent:#a78bfa; --accent2:#fbbf24;
+  --ok:#34d399; --warn:#fb923c; --err:#fb7185;
+  --chart-palette:#fbbf24,#a78bfa,#f8fafc,#facc15,#c4b5fd,#eab308,#e9d5ff,#fde68a,#8b5cf6,#f5f5f4;
+  --grafico:#fbbf24;
+  --tema-emoji:'🎆';
+}
+html[data-tema="ano-novo"] body{
+  background:radial-gradient(800px 350px at 50% -10%, rgba(251,191,36,.10), transparent 60%), var(--bg);
+}
+html[data-tema="ano-novo"] .btn-primario,
+html[data-tema="ano-novo"] button.primario{color:#33250a}
+
+/* ---------- CARNAVAL ------------------------------------------------------- */
+html[data-tema="carnaval"]{
+  --bg:#150826; --panel:#221040; --panel2:#2d1755; --line:#44257c;
+  --txt:#fdf4ff; --muted:#b79cd4; --accent:#facc15; --accent2:#e879f9;
+  --ok:#a3e635; --warn:#fb923c; --err:#fb7185;
+  --chart-palette:#facc15,#22d3ee,#f472b6,#a3e635,#fb7185,#38bdf8,#c084fc,#fb923c,#4ade80,#e879f9;
+  --grafico:#e879f9;
+  --tema-emoji:'🎭';
+}
+html[data-tema="carnaval"] body{
+  background:linear-gradient(90deg, rgba(250,204,21,.06), rgba(232,121,249,.06), rgba(34,211,238,.06)), var(--bg);
+}
+html[data-tema="carnaval"] .brand b{color:#e879f9}
+html[data-tema="carnaval"] .btn-primario,
+html[data-tema="carnaval"] button.primario{color:#3d0b4e}
+
+/* ---------- PÁSCOA --------------------------------------------------------- */
+html[data-tema="pascoa"]{
+  --bg:#faf6ef; --panel:#ffffff; --panel2:#f3ecfb; --line:#e2d5ef;
+  --txt:#3f2d52; --muted:#8d7ba6; --accent:#a855f7; --accent2:#8b5cf6;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#a78bfa,#f9a8d4,#86efac,#fde68a,#93c5fd,#fdba74,#c4b5fd,#f0abfc,#6ee7b7,#fca5a5;
+  --grafico:#8b5cf6;
+  --tema-emoji:'🐰';
+}
+html[data-tema="pascoa"] .btn-primario,
+html[data-tema="pascoa"] button.primario{color:#fff}
+
+/* ---------- DIA DAS MÃES --------------------------------------------------- */
+html[data-tema="maes"]{
+  --bg:#faf5f7; --panel:#ffffff; --panel2:#fbe8ee; --line:#efd0da;
+  --txt:#511f33; --muted:#a57389; --accent:#e11d48; --accent2:#db2777;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#e11d48,#f472b6,#c026d3,#fb7185,#a855f7,#fda4af,#db2777,#f9a8d4,#9d174d,#e879f9;
+  --grafico:#e11d48;
+  --tema-emoji:'💐';
+}
+html[data-tema="maes"] .btn-primario,
+html[data-tema="maes"] button.primario{color:#fff}
+
+/* ---------- DIA DOS PAIS --------------------------------------------------- */
+html[data-tema="pais"]{
+  --bg:#10151c; --panel:#1a222d; --panel2:#232e3c; --line:#37455a;
+  --txt:#e8edf4; --muted:#8c9bb0; --accent:#c8a24b; --accent2:#60a5fa;
+  --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+  --chart-palette:#60a5fa,#c8a24b,#94a3b8,#3b82f6,#e2c17a,#64748b,#93c5fd,#a16207,#475569,#2563eb;
+  --grafico:#60a5fa;
+  --tema-emoji:'👔';
+}
+
+/* ---------- FESTA JUNINA --------------------------------------------------- */
+html[data-tema="junina"]{
+  --bg:#221208; --panel:#2f1c0e; --panel2:#3c2513; --line:#5a3a20;
+  --txt:#fdf3e3; --muted:#c2a284; --accent:#f59e0b; --accent2:#fb923c;
+  --ok:#84cc16; --warn:#facc15; --err:#ef4444;
+  --chart-palette:#ef4444,#f59e0b,#22c55e,#3b82f6,#eab308,#ec4899,#fb923c,#84cc16,#f87171,#fde047;
+  --grafico:#fb923c;
+  --tema-emoji:'🎪';
+}
+html[data-tema="junina"] body{
+  /* bandeirinhas discretas no topo */
+  background:linear-gradient(90deg,
+      rgba(239,68,68,.10) 0 12.5%, rgba(245,158,11,.10) 0 25%,
+      rgba(34,197,94,.10) 0 37.5%, rgba(59,130,246,.10) 0 50%,
+      rgba(234,179,8,.10) 0 62.5%, rgba(236,72,153,.10) 0 75%,
+      rgba(251,146,60,.10) 0 87.5%, rgba(132,204,22,.10) 0 100%) top/100% 6px no-repeat, var(--bg);
+}
+html[data-tema="junina"] .btn-primario,
+html[data-tema="junina"] button.primario{color:#3a2503}
+
+/* ---------- DIA DAS CRIANÇAS ----------------------------------------------- */
+html[data-tema="criancas"]{
+  --bg:#f0f7ff; --panel:#ffffff; --panel2:#e3effd; --line:#c9dcf5;
+  --txt:#1e3a5f; --muted:#6b87a8; --accent:#f59e0b; --accent2:#3b82f6;
+  --ok:#22c55e; --warn:#fb923c; --err:#ef4444;
+  --chart-palette:#ef4444,#3b82f6,#facc15,#22c55e,#a855f7,#fb923c,#ec4899,#06b6d4,#84cc16,#6366f1;
+  --grafico:#3b82f6;
+  --tema-emoji:'🧸';
+}
+html[data-tema="criancas"] .btn-primario,
+html[data-tema="criancas"] button.primario{color:#fff}
+html[data-tema="criancas"] .kpi-card{border-top-width:6px}
+
+/* ---------- HALLOWEEN ------------------------------------------------------ */
+html[data-tema="halloween"]{
+  --bg:#120a18; --panel:#1d1226; --panel2:#271833; --line:#3f284f;
+  --txt:#f5ead9; --muted:#a893b8; --accent:#a855f7; --accent2:#f97316;
+  --ok:#84cc16; --warn:#facc15; --err:#e11d48;
+  --chart-palette:#f97316,#a855f7,#84cc16,#facc15,#e11d48,#fb923c,#c084fc,#a3e635,#f59e0b,#7c3aed;
+  --grafico:#f97316;
+  --tema-emoji:'🎃';
+}
+html[data-tema="halloween"] body{
+  background:radial-gradient(800px 350px at 80% -10%, rgba(249,115,22,.10), transparent 60%), var(--bg);
+}
+html[data-tema="halloween"] .btn-primario,
+html[data-tema="halloween"] button.primario{color:#341303}
+
+/* ---------- BLACK FRIDAY --------------------------------------------------- */
+html[data-tema="blackfriday"]{
+  --bg:#0a0a0a; --panel:#151515; --panel2:#1f1f1f; --line:#333333;
+  --txt:#f5f5f5; --muted:#8f8f8f; --accent:#facc15; --accent2:#eab308;
+  --ok:#22c55e; --warn:#fb923c; --err:#ef4444;
+  --chart-palette:#facc15,#f5f5f5,#ef4444,#a3a3a3,#eab308,#fde047,#737373,#fca5a5,#d4d4d4,#f59e0b;
+  --grafico:#facc15;
+  --tema-emoji:'🛍️';
+}
+html[data-tema="blackfriday"] .brand b{color:#facc15}
+html[data-tema="blackfriday"] .btn-primario,
+html[data-tema="blackfriday"] button.primario{color:#292103}
+
+</style>
+
+<div class="pag">
+  <header class="cab">
+    <div class="cab-topo"><span class="olho">Colosso · ApoloWeb · Frente de Caixa</span>
+      <select id="selTema" class="sel-tema" aria-label="Tema de cores (os mesmos das rotinas Colosso)" title="Tema de cores — os mesmos das rotinas Colosso"></select></div>
+    <h1>ApoloWeb: a frente de caixa</h1>
+    <p class="lead">Do login ao fechamento: como o operador registra, recebe e emite a NFC-e, mesmo sem internet.</p>
+  </header>
+
+  <section class="player" aria-label="Animação do processo">
+    <div class="palco" id="palco">
+
+      <!-- 1 · abertura -->
+      <svg class="cena ativa" viewBox="0 0 960 540" data-dur="9000" role="img" aria-label="O ApoloWeb registra, recebe e emite a NFC-e, e continua vendendo sem internet">
+        <text x="60" y="118" class="t-disp surge" font-size="76" style="animation-delay:.2s">ApoloWeb</text>
+        <text x="62" y="160" class="tx-mudo surge" font-size="22" style="animation-delay:.5s">a frente de caixa do Colosso</text>
+        <path class="sem-fill s-rota traco" style="--len:380;--dur:1.6s;animation-delay:1s" stroke-width="4" stroke-linecap="round" d="M110 280 H490"/>
+        <g class="cai" style="animation-delay:1.2s">
+          <circle cx="110" cy="280" r="42" class="f-painel s-rota" stroke-width="3"/>
+          <path d="M93 280 H127" class="sem-fill" stroke-width="34" style="stroke:var(--rota)" stroke-dasharray="3 2 1 2 4 2 2 3 1 2 3 2 2 1 4"/>
+          <text x="110" y="356" text-anchor="middle" class="t-disp" font-size="24">Registra</text>
+        </g>
+        <g class="cai" style="animation-delay:1.8s">
+          <circle cx="300" cy="280" r="42" class="f-painel s-rota" stroke-width="3"/>
+          <text x="300" y="291" text-anchor="middle" class="t-disp f-rota" font-size="30">R$</text>
+          <text x="300" y="356" text-anchor="middle" class="t-disp" font-size="24">Recebe</text>
+        </g>
+        <g class="cai" style="animation-delay:2.4s">
+          <circle cx="490" cy="280" r="42" class="f-painel s-rota" stroke-width="3"/>
+          <path d="M474 258 h22 l10 10 v34 h-32 z" class="f-suave s-rota" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M481 276 h18 M481 284 h18 M481 292 h12" class="sem-fill s-rota" stroke-width="2.5" stroke-linecap="round"/>
+          <text x="490" y="356" text-anchor="middle" class="t-disp" font-size="24">Emite a NFC-e</text>
+        </g>
+        <g class="surge" style="animation-delay:3.4s">
+          <rect x="60" y="405" width="500" height="88" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <path d="M88 466 a13 13 0 0 1 3 -26 a18 18 0 0 1 34 3 a12 12 0 0 1 -1 23 z" class="f-painel2" stroke-width="2.5" style="stroke:var(--mudo)"/>
+          <path d="M98 444 l18 18 M116 444 l-18 18" class="sem-fill s-alerta" stroke-width="3.5" stroke-linecap="round"/>
+          <text x="152" y="442" class="t-disp" font-size="24">Sem internet?</text>
+          <text x="152" y="470" font-size="17">o caixa continua vendendo</text>
+        </g>
+        <g class="cai" style="animation-delay:4.2s">
+          <circle cx="512" cy="449" r="22" class="f-ok"/>
+          <path d="M502 449 l7 7 l13 -15" class="sem-fill" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <!-- cupom saindo da impressora -->
+        <g class="sobe" style="transform-origin:center top;animation-delay:.8s">
+          <rect x="640" y="50" width="260" height="440" rx="8" class="f-painel s-linha" stroke-width="2"/>
+          <text x="770" y="88" text-anchor="middle" class="t-dado" font-size="13">SUPERMERCADO EXEMPLO</text>
+          <text x="770" y="110" text-anchor="middle" class="t-dado tx-mudo" font-size="13">CUPOM 000129</text>
+          <path d="M660 128 H880" class="sem-fill s-linha" stroke-width="2" stroke-dasharray="5 4"/>
+        </g>
+        <g class="t-dado" font-size="14">
+          <g class="surge" style="animation-delay:1.6s"><text x="662" y="160">ARROZ 5KG x3</text><text x="878" y="160" text-anchor="end">74,70</text></g>
+          <g class="surge" style="animation-delay:2s"><text x="662" y="188">CAFE 500G</text><text x="878" y="188" text-anchor="end">18,50</text></g>
+          <g class="surge" style="animation-delay:2.4s"><text x="662" y="216">LEITE 1L x2</text><text x="878" y="216" text-anchor="end">10,98</text></g>
+          <g class="surge" style="animation-delay:2.8s"><text x="662" y="244">PAO FRANCES</text><text x="878" y="244" text-anchor="end">6,25</text></g>
+        </g>
+        <g class="surge" style="animation-delay:3.2s">
+          <path d="M660 264 H880" class="sem-fill s-linha" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="662" y="298" class="t-disp" font-size="24">TOTAL</text>
+          <text x="878" y="298" text-anchor="end" class="t-disp" font-size="24">R$ 110,43</text>
+        </g>
+        <g class="cai" style="animation-delay:3.8s">
+          <rect x="725" y="322" width="90" height="90" rx="4" class="f-painel s-linha" stroke-width="1.5"/>
+          <g style="fill:var(--tinta)">
+            <rect x="731" y="328" width="22" height="22"/><rect x="787" y="328" width="22" height="22"/><rect x="731" y="384" width="22" height="22"/>
+            <rect x="760" y="330" width="8" height="8"/><rect x="772" y="342" width="8" height="8"/><rect x="760" y="356" width="8" height="8"/>
+            <rect x="788" y="360" width="8" height="8"/><rect x="800" y="372" width="8" height="8"/><rect x="764" y="380" width="8" height="8"/>
+            <rect x="776" y="394" width="8" height="8"/><rect x="796" y="394" width="8" height="8"/><rect x="740" y="362" width="8" height="8"/>
+          </g>
+          <rect x="736" y="333" width="12" height="12" class="f-painel"/><rect x="792" y="333" width="12" height="12" class="f-painel"/><rect x="736" y="389" width="12" height="12" class="f-painel"/>
+        </g>
+        <text x="770" y="448" text-anchor="middle" class="f-ok surge" font-size="15" font-weight="600" style="animation-delay:4.4s">NFC-e autorizada</text>
+      </svg>
+
+      <!-- 2 · login, sincronizacao e abertura -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10000" role="img" aria-label="Login com matrícula e senha, sincronização dos dados e abertura do caixa com o suprimento inicial">
+        <g class="surge" style="animation-delay:.2s">
+          <rect x="30" y="80" width="270" height="320" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="50" y="122" class="t-disp" font-size="24">1 · Login</text>
+          <text x="50" y="164" class="tx-mudo" font-size="14">Matrícula</text>
+          <rect x="50" y="174" width="230" height="42" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <text x="50" y="242" class="tx-mudo" font-size="14">Senha</text>
+          <rect x="50" y="252" width="230" height="42" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/>
+        </g>
+        <text x="64" y="202" class="t-dado surge" font-size="18" style="animation-delay:.8s">1042</text>
+        <text x="64" y="281" class="t-dado surge" font-size="18" style="animation-delay:1.3s">••••••</text>
+        <g class="cai" style="animation-delay:1.7s">
+          <rect x="50" y="326" width="230" height="46" rx="10" class="f-rota"/>
+          <text x="165" y="355" text-anchor="middle" class="tx-escuro" font-size="17" font-weight="600">Entrar</text>
+        </g>
+        <path class="sem-fill s-rota traco" style="--len:60;--dur:.5s;animation-delay:2.1s" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M306 240 H336 M326 230 l10 10 l-10 10"/>
+        <g class="surge" style="animation-delay:2.3s">
+          <rect x="345" y="80" width="270" height="320" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="365" y="122" class="t-disp" font-size="24">2 · Sincronização</text>
+          <text x="365" y="146" class="tx-mudo" font-size="14">dados do servidor no caixa</text>
+          <text x="365" y="190" font-size="16">Produtos</text>
+          <rect x="365" y="200" width="230" height="10" rx="5" class="f-linha"/>
+          <text x="365" y="254" font-size="16">Preços</text>
+          <rect x="365" y="264" width="230" height="10" rx="5" class="f-linha"/>
+          <text x="365" y="318" font-size="16">Clientes</text>
+          <rect x="365" y="328" width="230" height="10" rx="5" class="f-linha"/>
+        </g>
+        <rect x="365" y="200" width="230" height="10" rx="5" class="f-azul cresce" style="animation-delay:2.7s"/>
+        <rect x="365" y="264" width="230" height="10" rx="5" class="f-azul cresce" style="animation-delay:3.1s"/>
+        <rect x="365" y="328" width="230" height="10" rx="5" class="f-azul cresce" style="animation-delay:3.5s"/>
+        <g class="cai" style="animation-delay:3.6s"><circle cx="585" cy="184" r="10" class="f-ok"/><path d="M580 184 l4 4 l7 -8" class="sem-fill" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></g>
+        <g class="cai" style="animation-delay:4s"><circle cx="585" cy="248" r="10" class="f-ok"/><path d="M580 248 l4 4 l7 -8" class="sem-fill" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></g>
+        <g class="cai" style="animation-delay:4.4s"><circle cx="585" cy="312" r="10" class="f-ok"/><path d="M580 312 l4 4 l7 -8" class="sem-fill" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></g>
+        <path class="sem-fill s-rota traco" style="--len:60;--dur:.5s;animation-delay:4.7s" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M621 240 H651 M641 230 l10 10 l-10 10"/>
+        <g class="surge" style="animation-delay:4.9s">
+          <rect x="660" y="80" width="270" height="320" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="680" y="122" class="t-disp" font-size="24">3 · Abertura</text>
+          <text x="680" y="164" class="tx-mudo" font-size="14">Suprimento inicial (troco)</text>
+          <rect x="680" y="174" width="230" height="48" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <text x="680" y="256" class="tx-mudo" font-size="14">o dinheiro que já está</text>
+          <text x="680" y="276" class="tx-mudo" font-size="14">na gaveta</text>
+        </g>
+        <text x="696" y="206" class="t-dado surge" font-size="20" style="animation-delay:5.4s">R$ 150,00</text>
+        <g class="cai" style="animation-delay:5.9s">
+          <rect x="680" y="326" width="230" height="46" rx="10" class="f-ok"/>
+          <text x="795" y="355" text-anchor="middle" class="tx-claro" font-size="17" font-weight="600">Abrir Caixa</text>
+        </g>
+        <g class="cai" style="animation-delay:6.6s">
+          <rect x="290" y="436" width="380" height="58" rx="29" class="f-suave"/>
+          <text x="480" y="471" text-anchor="middle" font-size="19" font-weight="600">Caixa livre: pronto para vender</text>
+        </g>
+      </svg>
+
+      <!-- 3 · a tela do PDV -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="12000" role="img" aria-label="A tela do PDV: cabeçalho, itens, total e código de barras, teclas de função, e a ajuda aberta com dois cliques no logotipo">
+        <g class="surge" style="animation-delay:.2s">
+          <rect x="30" y="50" width="620" height="440" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="31" y="51" width="618" height="44" rx="11" class="f-painel2"/>
+          <text x="48" y="80" class="t-disp f-rota" font-size="21">ApoloWeb</text>
+          <text x="148" y="78" class="tx-mudo" font-size="13">Caixa 03</text>
+          <rect x="252" y="62" width="70" height="22" rx="11" class="f-ok"/>
+          <text x="287" y="77" text-anchor="middle" class="tx-claro" font-size="11" font-weight="600">ONLINE</text>
+          <text x="334" y="78" font-size="13">Cupom #129</text>
+          <text x="632" y="78" text-anchor="end" font-size="13">Ana · 14:32</text>
+          <!-- itens -->
+          <rect x="44" y="106" width="380" height="300" rx="8" class="f-painel2"/>
+          <text x="58" y="132" font-size="14" font-weight="600">Itens do Cupom</text>
+          <g class="tx-mudo" font-size="12"><text x="58" y="160">#</text><text x="80" y="160">Descrição</text><text x="336" y="160" text-anchor="end">Qtde</text><text x="410" y="160" text-anchor="end">Total</text></g>
+          <g font-size="13">
+            <text x="58" y="188">1</text><text x="80" y="188">ARROZ TIPO 1 5KG</text><text x="336" y="188" text-anchor="end" class="t-dado">3,000</text><text x="410" y="188" text-anchor="end" class="t-dado">74,70</text>
+            <text x="58" y="216">2</text><text x="80" y="216">CAFÉ TORRADO 500G</text><text x="336" y="216" text-anchor="end" class="t-dado">1,000</text><text x="410" y="216" text-anchor="end" class="t-dado">18,50</text>
+            <text x="58" y="244">3</text><text x="80" y="244">LEITE INTEGRAL 1L</text><text x="336" y="244" text-anchor="end" class="t-dado">2,000</text><text x="410" y="244" text-anchor="end" class="t-dado">10,98</text>
+            <text x="58" y="272">4</text><text x="80" y="272">PÃO FRANCÊS KG</text><text x="336" y="272" text-anchor="end" class="t-dado">0,500</text><text x="410" y="272" text-anchor="end" class="t-dado">6,25</text>
+          </g>
+          <!-- lateral -->
+          <rect x="436" y="106" width="200" height="300" rx="8" class="f-painel2"/>
+          <text x="452" y="134" class="tx-mudo" font-size="13">TOTAL</text>
+          <text x="452" y="174" class="t-disp" font-size="32">R$ 110,43</text>
+          <text x="452" y="230" class="tx-mudo" font-size="12">Código de barras</text>
+          <rect x="452" y="240" width="168" height="34" rx="6" class="f-painel s-linha" stroke-width="1.5"/>
+          <text x="464" y="262" class="t-dado" font-size="13">7891000…</text>
+          <text x="452" y="304" class="tx-mudo" font-size="12">Vend: 210</text>
+          <!-- teclas -->
+          <g class="t-dado" font-size="13" text-anchor="middle">
+            <rect x="44" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="66" y="451">F1</text>
+            <rect x="94" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="116" y="451">F2</text>
+            <rect x="144" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="166" y="451">F3</text>
+            <rect x="194" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="216" y="451">F4</text>
+            <rect x="244" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="266" y="451">F5</text>
+            <rect x="294" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="316" y="451">F6</text>
+            <rect x="344" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="366" y="451">F7</text>
+            <rect x="394" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="416" y="451">F8</text>
+            <rect x="444" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="466" y="451">F9</text>
+            <rect x="494" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="516" y="451">F10</text>
+            <rect x="544" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="566" y="451">F11</text>
+            <rect x="594" y="424" width="44" height="44" rx="6" class="f-painel2"/><text x="616" y="451">F12</text>
+          </g>
+        </g>
+        <!-- marcadores numerados -->
+        <g class="cai" style="animation-delay:1.2s"><circle cx="228" cy="73" r="13" class="f-rota"/><text x="228" y="78" text-anchor="middle" class="tx-escuro t-disp" font-size="16">1</text></g>
+        <g class="cai" style="animation-delay:2.4s"><circle cx="406" cy="128" r="13" class="f-rota"/><text x="406" y="133" text-anchor="middle" class="tx-escuro t-disp" font-size="16">2</text></g>
+        <g class="cai" style="animation-delay:3.6s"><circle cx="618" cy="128" r="13" class="f-rota"/><text x="618" y="133" text-anchor="middle" class="tx-escuro t-disp" font-size="16">3</text></g>
+        <g class="cai" style="animation-delay:4.8s"><circle cx="340" cy="412" r="13" class="f-rota"/><text x="340" y="417" text-anchor="middle" class="tx-escuro t-disp" font-size="16">4</text></g>
+        <!-- legendas -->
+        <g class="surge" style="animation-delay:1.3s"><circle cx="690" cy="88" r="13" class="f-rota"/><text x="690" y="93" text-anchor="middle" class="tx-escuro t-disp" font-size="16">1</text>
+          <text x="714" y="94" class="t-disp" font-size="21">Cabeçalho</text><text x="714" y="116" class="tx-mudo" font-size="14">conexão, cupom e operador</text></g>
+        <g class="surge" style="animation-delay:2.5s"><circle cx="690" cy="168" r="13" class="f-rota"/><text x="690" y="173" text-anchor="middle" class="tx-escuro t-disp" font-size="16">2</text>
+          <text x="714" y="174" class="t-disp" font-size="21">Itens da venda</text><text x="714" y="196" class="tx-mudo" font-size="14">tudo o que já foi lido</text></g>
+        <g class="surge" style="animation-delay:3.7s"><circle cx="690" cy="248" r="13" class="f-rota"/><text x="690" y="253" text-anchor="middle" class="tx-escuro t-disp" font-size="16">3</text>
+          <text x="714" y="254" class="t-disp" font-size="21">Total e código</text><text x="714" y="276" class="tx-mudo" font-size="14">leitor ou busca do produto</text></g>
+        <g class="surge" style="animation-delay:4.9s"><circle cx="690" cy="328" r="13" class="f-rota"/><text x="690" y="333" text-anchor="middle" class="tx-escuro t-disp" font-size="16">4</text>
+          <text x="714" y="334" class="t-disp" font-size="21">Teclas F1 a F12</text><text x="714" y="356" class="tx-mudo" font-size="14">um atalho para cada ação</text></g>
+        <g class="surge" style="animation-delay:6.4s"><circle cx="690" cy="408" r="13" class="f-ok"/><text x="690" y="413" text-anchor="middle" class="tx-claro t-disp" font-size="16">?</text>
+          <text x="714" y="414" class="t-disp" font-size="21">Ajuda</text><text x="714" y="436" class="tx-mudo" font-size="14">dois cliques no logotipo</text></g>
+        <!-- duplo clique no logo -->
+        <circle cx="84" cy="74" r="20" class="sem-fill s-ok anel" stroke-width="3" style="animation-delay:6.2s;opacity:0"/>
+        <circle cx="84" cy="74" r="20" class="sem-fill s-ok anel" stroke-width="3" style="animation-delay:6.6s;opacity:0"/>
+        <path class="surge" style="animation-delay:5.8s;fill:var(--painel);stroke:var(--tinta)" stroke-width="2" stroke-linejoin="round" d="M90 80 l0 24 l6 -5 l4 10 l5 -2 l-4 -10 l8 0 z"/>
+        <g class="cai" style="animation-delay:7.3s">
+          <rect x="130" y="140" width="380" height="230" rx="12" class="f-painel s-ok" stroke-width="2.5"/>
+          <text x="152" y="176" class="t-disp" font-size="22">Ajuda do PDV</text>
+          <rect x="352" y="158" width="140" height="26" rx="6" class="f-painel2 s-linha" stroke-width="1"/>
+          <text x="362" y="176" class="tx-mudo" font-size="11">Procurar na ajuda</text>
+          <path d="M146 196 H494" class="sem-fill s-linha" stroke-width="1.5"/>
+          <rect x="148" y="210" width="100" height="22" rx="5" class="f-suave"/>
+          <rect x="154" y="218" width="76" height="6" rx="3" class="f-mudo"/>
+          <rect x="154" y="248" width="70" height="6" rx="3" class="f-linha"/><rect x="154" y="270" width="84" height="6" rx="3" class="f-linha"/>
+          <rect x="154" y="292" width="62" height="6" rx="3" class="f-linha"/><rect x="154" y="314" width="78" height="6" rx="3" class="f-linha"/>
+          <rect x="268" y="214" width="150" height="10" rx="4" class="f-rota"/>
+          <rect x="268" y="238" width="222" height="6" rx="3" class="f-linha"/><rect x="268" y="254" width="200" height="6" rx="3" class="f-linha"/>
+          <rect x="268" y="270" width="214" height="6" rx="3" class="f-linha"/><rect x="268" y="296" width="222" height="6" rx="3" class="f-linha"/>
+          <rect x="268" y="312" width="180" height="6" rx="3" class="f-linha"/><rect x="268" y="328" width="206" height="6" rx="3" class="f-linha"/>
+        </g>
+      </svg>
+
+      <!-- 4 · registrando os produtos -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10500" role="img" aria-label="Quantidade com asterisco, código de barras e Enter lançam o item; F1 busca o produto pelo nome">
+        <text x="40" y="78" class="tx-mudo surge" font-size="14" style="animation-delay:.1s">Campo do código de barras</text>
+        <rect x="40" y="90" width="440" height="56" rx="10" class="f-painel s-rota surge" stroke-width="2" style="animation-delay:.1s"/>
+        <g class="surge" style="animation-delay:.4s"><rect x="56" y="102" width="34" height="32" rx="6" class="f-painel2 s-linha" stroke-width="1.5"/><text x="73" y="124" text-anchor="middle" class="t-dado" font-size="16">3</text></g>
+        <g class="surge" style="animation-delay:.9s"><rect x="98" y="102" width="34" height="32" rx="6" class="f-painel2 s-linha" stroke-width="1.5"/><text x="115" y="125" text-anchor="middle" class="t-dado" font-size="18">*</text></g>
+        <g class="surge" style="animation-delay:1.5s"><rect x="140" y="102" width="150" height="32" rx="6" class="f-painel2 s-linha" stroke-width="1.5"/><text x="215" y="124" text-anchor="middle" class="t-dado" font-size="15">7891000100103</text></g>
+        <g class="surge" style="animation-delay:2.1s"><rect x="298" y="102" width="70" height="32" rx="6" class="f-rota"/><text x="333" y="123" text-anchor="middle" class="tx-escuro" font-size="15" font-weight="600">Enter</text></g>
+        <g class="cai" style="animation-delay:1.1s"><rect x="40" y="160" width="110" height="32" rx="16" class="f-suave"/><text x="95" y="181" text-anchor="middle" font-size="15" font-weight="600">Qtd: 3</text></g>
+        <g class="cai" style="animation-delay:2.5s"><rect x="164" y="160" width="230" height="32" rx="16" class="f-ok"/><text x="279" y="181" text-anchor="middle" class="tx-claro" font-size="15" font-weight="600">Venda #129 iniciada</text></g>
+        <g class="surge" style="animation-delay:.3s">
+          <rect x="520" y="60" width="400" height="200" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="540" y="92" font-size="15" font-weight="600">Itens do Cupom</text>
+          <g class="tx-mudo" font-size="12"><text x="540" y="118">#  Descrição</text><text x="800" y="118" text-anchor="end">Qtd × Unit.</text><text x="898" y="118" text-anchor="end">Total</text></g>
+        </g>
+        <g class="surge" style="animation-delay:2.9s">
+          <rect x="532" y="128" width="376" height="36" rx="6" class="f-suave"/>
+          <text x="542" y="151" font-size="14">1  ARROZ TIPO 1 5KG</text>
+          <text x="800" y="151" text-anchor="end" class="t-dado" font-size="13">3 × 24,90</text>
+          <text x="898" y="151" text-anchor="end" class="t-dado" font-size="14" font-weight="600">74,70</text>
+        </g>
+        <text x="540" y="198" class="tx-mudo surge" font-size="13" style="animation-delay:3.4s">a quantidade volta para 1 no próximo item</text>
+        <text x="540" y="236" class="t-disp surge" font-size="22" style="animation-delay:3.4s">R$ 74,70</text>
+        <!-- F1 busca -->
+        <g class="surge" style="animation-delay:4.2s">
+          <rect x="40" y="290" width="880" height="200" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="60" y="312" width="48" height="38" rx="8" class="f-rota"/>
+          <text x="84" y="338" text-anchor="middle" class="t-disp tx-escuro" font-size="22">F1</text>
+          <text x="122" y="338" class="t-disp" font-size="24">Buscar produto</text>
+          <text x="60" y="378" class="tx-mudo" font-size="14">sem código de barras? procure pelo nome</text>
+          <rect x="60" y="396" width="300" height="44" rx="8" class="f-painel2 s-rota" stroke-width="1.5"/>
+        </g>
+        <text x="76" y="424" class="surge" font-size="17" style="animation-delay:4.8s">café</text>
+        <g font-size="14">
+          <g class="surge" style="animation-delay:5.2s"><rect x="400" y="312" width="500" height="40" rx="6" class="f-painel2"/><text x="416" y="337">CAFÉ TORRADO 500G</text><text x="800" y="337" text-anchor="end" class="t-dado">18,50</text></g>
+          <g class="surge" style="animation-delay:5.4s"><rect x="400" y="360" width="500" height="40" rx="6" class="f-painel2"/><text x="416" y="385">CAFÉ EXTRA FORTE 250G</text><text x="800" y="385" text-anchor="end" class="t-dado">11,90</text></g>
+          <g class="surge" style="animation-delay:5.6s"><rect x="400" y="408" width="500" height="40" rx="6" class="f-painel2"/><text x="416" y="433">CAFÉ SOLÚVEL 100G</text><text x="800" y="433" text-anchor="end" class="t-dado">9,80</text></g>
+        </g>
+        <g class="surge" style="animation-delay:6.3s"><rect x="400" y="360" width="500" height="40" rx="6" class="sem-fill s-rota" stroke-width="2.5"/></g>
+        <g class="cai" style="animation-delay:6.8s"><rect x="820" y="366" width="70" height="28" rx="6" class="f-rota"/><text x="855" y="385" text-anchor="middle" class="tx-escuro" font-size="14" font-weight="600">Enter</text></g>
+        <text x="400" y="474" class="tx-mudo surge" font-size="13" style="animation-delay:6.8s">setas escolhem · Enter lança o item · Esc volta</text>
+      </svg>
+
+      <!-- 5 · balanca e peso -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10500" role="img" aria-label="Etiqueta de balança com 13 dígitos começando com 2: o PDV lê o preço e calcula o peso; peso variável pede o peso; quantidade com vírgula só para quilo ou metro">
+        <g class="surge" style="animation-delay:.2s">
+          <rect x="40" y="60" width="460" height="230" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="60" y="96" class="t-disp" font-size="23">Etiqueta da balança</text>
+          <text x="60" y="120" class="t-dado tx-mudo" font-size="13">FRANGO RESFRIADO · R$ 25,00/kg</text>
+        </g>
+        <path class="sem-fill cresce" style="stroke:var(--tinta);animation-delay:.6s" stroke-width="58" d="M76 166 H352" stroke-dasharray="3 2 1 3 4 2 2 1 3 3 1 2 2 4 1 1 3 2 4 1 2 2 1 3 3 1 2 4 1 2 3 1"/>
+        <g class="t-dado surge" font-size="28" style="animation-delay:1s">
+          <text x="76" y="230" class="f-rota">2</text><text x="98" y="230">0</text><text x="122" y="230" class="f-azul">01234</text><text x="220" y="230" class="f-ok">01250</text><text x="318" y="230">7</text>
+        </g>
+        <g class="surge" style="animation-delay:1.6s"><path d="M76 242 h17" class="sem-fill s-rota" stroke-width="4" stroke-linecap="round"/><text x="60" y="268" class="f-rota" font-size="13" font-weight="600">começa com 2</text></g>
+        <g class="surge" style="animation-delay:2.1s"><path d="M122 242 h84" class="sem-fill s-azul" stroke-width="4" stroke-linecap="round"/><text x="176" y="268" text-anchor="middle" class="f-azul" font-size="13" font-weight="600">código</text></g>
+        <g class="surge" style="animation-delay:2.6s"><path d="M220 242 h84" class="sem-fill s-ok" stroke-width="4" stroke-linecap="round"/><text x="262" y="268" text-anchor="middle" class="f-ok" font-size="13" font-weight="600">preço 12,50</text></g>
+        <text x="380" y="176" class="t-disp tx-mudo surge" font-size="20" style="animation-delay:1.2s">13</text>
+        <text x="380" y="198" class="tx-mudo surge" font-size="13" style="animation-delay:1.2s">dígitos</text>
+        <g class="surge" style="animation-delay:3.2s">
+          <rect x="530" y="60" width="390" height="230" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="550" y="96" class="t-disp" font-size="23">O PDV calcula o peso</text>
+          <text x="550" y="142" font-size="15">preço da etiqueta</text><text x="900" y="142" text-anchor="end" class="t-dado" font-size="16">R$ 12,50</text>
+          <text x="550" y="178" font-size="15">÷ preço do quilo</text><text x="900" y="178" text-anchor="end" class="t-dado" font-size="16">R$ 25,00</text>
+          <path d="M550 198 H900" class="sem-fill s-linha" stroke-width="2"/>
+          <text x="550" y="244" font-size="16" font-weight="600">= peso vendido</text>
+        </g>
+        <text x="900" y="250" text-anchor="end" class="t-disp f-ok cai" font-size="40" style="animation-delay:4s">0,500 kg</text>
+        <g class="surge" style="animation-delay:5s">
+          <rect x="40" y="320" width="430" height="170" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="60" y="354" class="t-disp" font-size="21">Peso variável sem etiqueta</text>
+          <rect x="60" y="372" width="390" height="98" rx="10" class="f-painel2"/>
+          <text x="76" y="400" font-size="14">Informe o peso/quantidade:</text>
+          <rect x="76" y="414" width="200" height="40" rx="6" class="f-painel s-linha" stroke-width="1.5"/>
+          <rect x="290" y="414" width="64" height="40" rx="8" class="f-rota"/>
+          <text x="322" y="440" text-anchor="middle" class="tx-escuro" font-size="15" font-weight="600">OK</text>
+        </g>
+        <text x="90" y="441" class="t-dado surge" font-size="18" style="animation-delay:5.6s">1,250</text>
+        <g class="surge" style="animation-delay:6.4s">
+          <rect x="490" y="320" width="430" height="170" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="510" y="354" class="t-disp" font-size="21">Quantidade com vírgula</text>
+          <text x="510" y="378" class="tx-mudo" font-size="14">só para produto vendido em quilo ou metro</text>
+        </g>
+        <g class="cai" style="animation-delay:6.9s"><rect x="510" y="404" width="110" height="46" rx="23" class="f-ok"/><text x="565" y="433" text-anchor="middle" class="tx-claro" font-size="17" font-weight="600">KG ✓</text></g>
+        <g class="cai" style="animation-delay:7.2s"><rect x="632" y="404" width="110" height="46" rx="23" class="f-ok"/><text x="687" y="433" text-anchor="middle" class="tx-claro" font-size="17" font-weight="600">MT ✓</text></g>
+        <g class="cai" style="animation-delay:7.5s"><rect x="754" y="404" width="110" height="46" rx="23" class="f-alerta"/><text x="809" y="433" text-anchor="middle" class="tx-claro" font-size="17" font-weight="600">UN ✗</text></g>
+      </svg>
+
+      <!-- 6 · cliente na nota -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10000" role="img" aria-label="F2 abre a identificação do consumidor; com cadastro o nome aparece no cabeçalho, sem cadastro o CPF vai na nota com o consumidor padrão">
+        <g class="cai" style="animation-delay:.2s">
+          <rect x="40" y="200" width="84" height="72" rx="12" class="f-rota"/>
+          <text x="82" y="248" text-anchor="middle" class="t-disp tx-escuro" font-size="34">F2</text>
+        </g>
+        <g class="surge" style="animation-delay:.7s">
+          <rect x="150" y="128" width="390" height="214" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="170" y="164" class="t-disp" font-size="21">Identificação do Consumidor</text>
+          <text x="170" y="198" class="tx-mudo" font-size="13">CPF / CNPJ</text>
+          <rect x="170" y="208" width="222" height="44" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <text x="170" y="312" class="tx-mudo" font-size="13">só com a venda já iniciada</text>
+        </g>
+        <text x="184" y="236" class="t-dado surge" font-size="17" style="animation-delay:1.4s">123.456.789-09</text>
+        <g class="cai" style="animation-delay:2s"><rect x="402" y="208" width="120" height="44" rx="8" class="f-rota"/><text x="462" y="236" text-anchor="middle" class="tx-escuro" font-size="15" font-weight="600">Identificar</text></g>
+        <path class="sem-fill s-ok traco" style="--len:160;--dur:.9s;animation-delay:2.6s" stroke-width="3.5" stroke-linecap="round" d="M540 220 C 570 220 570 140 600 140"/>
+        <path class="sem-fill s-azul traco" style="--len:200;--dur:.9s;animation-delay:4.2s" stroke-width="3.5" stroke-linecap="round" d="M540 250 C 570 250 570 390 600 390"/>
+        <g class="surge" style="animation-delay:3.2s">
+          <rect x="600" y="60" width="330" height="160" rx="12" class="f-painel s-ok" stroke-width="2.5"/>
+          <text x="620" y="96" class="t-disp" font-size="22">Com cadastro</text>
+          <text x="620" y="120" class="tx-mudo" font-size="14">o nome aparece no alto da tela</text>
+          <rect x="620" y="144" width="290" height="44" rx="22" class="f-painel2 s-ok" stroke-width="1.5"/>
+          <text x="765" y="171" text-anchor="middle" font-size="13" font-weight="600">MARIA SOUZA · 123.456.789-09</text>
+        </g>
+        <g class="surge" style="animation-delay:4.8s">
+          <rect x="600" y="300" width="330" height="180" rx="12" class="f-painel s-azul" stroke-width="2.5"/>
+          <text x="620" y="336" class="t-disp" font-size="22">Sem cadastro</text>
+          <text x="620" y="360" class="tx-mudo" font-size="14">o CPF vai na nota assim mesmo</text>
+          <rect x="620" y="378" width="290" height="84" rx="8" class="f-painel2"/>
+          <text x="636" y="410" class="t-dado" font-size="13">NFC-e · CPF 123.456.789-09</text>
+          <text x="636" y="440" class="tx-mudo" font-size="13">consumidor padrão da loja</text>
+        </g>
+      </svg>
+
+      <!-- 7 · descontos e cancelamentos -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11000" role="img" aria-label="F3 desconto no total, Shift F3 desconto no item, F6 cancela item, F12 cancela a venda; sem permissão o caixa pede a senha do supervisor">
+        <g class="surge" style="animation-delay:.2s">
+          <rect x="40" y="40" width="430" height="166" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="60" y="58" width="52" height="36" rx="8" class="f-rota"/><text x="86" y="83" text-anchor="middle" class="t-disp tx-escuro" font-size="20">F3</text>
+          <text x="126" y="84" class="t-disp" font-size="22">Desconto no total</text>
+          <text x="60" y="128" font-size="15">Subtotal</text><text x="450" y="128" text-anchor="end" class="t-dado" font-size="15">110,43</text>
+          <text x="60" y="156" font-size="15">Desconto</text><text x="450" y="156" text-anchor="end" class="t-dado f-alerta" font-size="15">− 5,00</text>
+          <text x="60" y="188" font-size="16" font-weight="600">Total</text><text x="450" y="188" text-anchor="end" class="t-dado" font-size="16" font-weight="600">105,43</text>
+        </g>
+        <g class="surge" style="animation-delay:1s">
+          <rect x="490" y="40" width="430" height="166" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="510" y="58" width="68" height="36" rx="8" class="f-rota"/><text x="544" y="83" text-anchor="middle" class="t-disp tx-escuro" font-size="20">⇧ F3</text>
+          <text x="592" y="84" class="t-disp" font-size="22">Desconto no item</text>
+          <text x="510" y="126" class="tx-mudo" font-size="14">item 2 · CAFÉ TORRADO 500G</text>
+          <rect x="510" y="142" width="104" height="38" rx="19" class="f-suave"/><text x="562" y="166" text-anchor="middle" class="t-dado" font-size="15">R$ 2,50</text>
+          <text x="638" y="166" text-anchor="middle" class="tx-mudo" font-size="14">ou</text>
+          <rect x="662" y="142" width="84" height="38" rx="19" class="f-suave"/><text x="704" y="166" text-anchor="middle" class="t-dado" font-size="15">10%</text>
+          <text x="764" y="166" class="tx-mudo" font-size="13">zero remove</text>
+        </g>
+        <g class="surge" style="animation-delay:1.8s">
+          <rect x="40" y="222" width="430" height="166" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="60" y="240" width="52" height="36" rx="8" class="f-rota"/><text x="86" y="265" text-anchor="middle" class="t-disp tx-escuro" font-size="20">F6</text>
+          <text x="126" y="266" class="t-disp" font-size="22">Cancelar item</text>
+          <rect x="60" y="294" width="390" height="40" rx="6" class="f-painel2"/>
+          <text x="74" y="319" font-size="14">3  LEITE INTEGRAL 1L</text><text x="436" y="319" text-anchor="end" class="t-dado" font-size="14">10,98</text>
+          <text x="60" y="366" class="tx-mudo" font-size="13">fica riscado na grade e sai do total</text>
+        </g>
+        <path class="sem-fill s-alerta traco" style="--len:380;--dur:.8s;animation-delay:2.6s" stroke-width="3" stroke-linecap="round" d="M68 314 H444"/>
+        <g class="surge" style="animation-delay:3s">
+          <rect x="490" y="222" width="430" height="166" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="510" y="240" width="60" height="36" rx="8" class="f-alerta"/><text x="540" y="265" text-anchor="middle" class="t-disp tx-claro" font-size="20">F12</text>
+          <text x="584" y="266" class="t-disp" font-size="22">Cancelar a venda</text>
+          <rect x="514" y="292" width="52" height="70" rx="5" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <path d="M522 306 h36 M522 318 h36 M522 330 h28 M522 342 h36" class="sem-fill s-linha" stroke-width="2.5"/>
+          <text x="590" y="320" font-size="15">a venda inteira</text>
+          <text x="590" y="344" class="tx-mudo" font-size="13">depois de confirmar</text>
+        </g>
+        <path class="sem-fill s-alerta traco" style="--len:100;--dur:.5s;animation-delay:3.6s" stroke-width="4" stroke-linecap="round" d="M510 290 L570 364 M570 290 L510 364"/>
+        <g class="surge" style="animation-delay:4.6s">
+          <rect x="40" y="404" width="880" height="96" rx="12" class="f-painel" stroke-width="2.5" style="stroke:var(--aviso)"/>
+          <path d="M76 440 v-8 a12 12 0 0 1 24 0 v8" class="sem-fill" stroke-width="4" style="stroke:var(--aviso)"/>
+          <rect x="68" y="440" width="40" height="32" rx="5" class="f-aviso"/>
+          <text x="130" y="444" class="t-disp" font-size="23">Sem permissão?</text>
+          <text x="130" y="474" font-size="15">o caixa pede a matrícula e a senha do supervisor</text>
+        </g>
+        <g class="cai" style="animation-delay:5.2s"><rect x="590" y="430" width="150" height="44" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/><text x="606" y="457" class="t-dado" font-size="15">Mat. 2001</text></g>
+        <g class="cai" style="animation-delay:5.6s"><rect x="754" y="430" width="146" height="44" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/><text x="770" y="458" class="t-dado" font-size="16">••••••</text></g>
+      </svg>
+
+      <!-- 8 · pagamento -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11000" role="img" aria-label="F4 abre o pagamento; cartão e dinheiro na mesma venda, o restante cai a zero, o troco aparece e F5 finaliza">
+        <g font-size="15" text-anchor="middle">
+          <g class="surge" style="animation-delay:.2s"><rect x="40" y="50" width="138" height="42" rx="21" class="f-painel s-linha" stroke-width="1.5"/><text x="109" y="76">F1 Dinheiro</text></g>
+          <g class="surge" style="animation-delay:.3s"><rect x="188" y="50" width="138" height="42" rx="21" class="f-painel s-linha" stroke-width="1.5"/><text x="257" y="76">F2 Cheque</text></g>
+          <g class="surge" style="animation-delay:.4s"><rect x="336" y="50" width="138" height="42" rx="21" class="f-painel s-linha" stroke-width="1.5"/><text x="405" y="76">F3 Cartão</text></g>
+          <g class="surge" style="animation-delay:.5s"><rect x="484" y="50" width="138" height="42" rx="21" class="f-painel s-linha" stroke-width="1.5"/><text x="553" y="76">F4 PIX</text></g>
+          <g class="surge" style="animation-delay:.6s"><rect x="632" y="50" width="138" height="42" rx="21" class="f-painel s-linha" stroke-width="1.5"/><text x="701" y="76">F5 Cobrança</text></g>
+          <g class="surge" style="animation-delay:.7s"><rect x="780" y="50" width="138" height="42" rx="21" class="f-painel s-linha" stroke-width="1.5"/><text x="849" y="76">F6 POS</text></g>
+        </g>
+        <g class="surge" style="animation-delay:1s">
+          <rect x="40" y="120" width="420" height="290" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="60" y="156" class="t-disp" font-size="22">Pagamentos registrados</text>
+          <text x="60" y="390" class="tx-mudo" font-size="13">Enter registra cada pagamento</text>
+        </g>
+        <g class="surge" style="animation-delay:1.4s"><rect x="60" y="180" width="380" height="54" rx="8" class="f-painel2"/><text x="76" y="213" font-size="16">Cartão de crédito</text><text x="424" y="213" text-anchor="end" class="t-dado" font-size="16">120,00</text></g>
+        <g class="surge" style="animation-delay:2.8s"><rect x="60" y="244" width="380" height="54" rx="8" class="f-painel2"/><text x="76" y="277" font-size="16">Dinheiro</text><text x="424" y="277" text-anchor="end" class="t-dado" font-size="16">70,00</text></g>
+        <g class="surge" style="animation-delay:.8s">
+          <rect x="490" y="120" width="430" height="290" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="510" y="160" class="tx-mudo" font-size="15">Total da venda</text>
+          <text x="900" y="164" text-anchor="end" class="t-disp" font-size="34">R$ 187,40</text>
+          <rect x="510" y="194" width="390" height="22" rx="11" class="f-linha"/>
+          <text x="510" y="258" class="tx-mudo" font-size="15">Restante</text>
+          <text x="590" y="258" class="t-dado tx-mudo" font-size="15">187,40</text>
+        </g>
+        <rect x="510" y="194" width="250" height="22" rx="11" class="f-ok cresce" style="animation-delay:1.6s"/>
+        <rect x="750" y="194" width="150" height="22" rx="11" class="f-ok cresce" style="animation-delay:3s"/>
+        <text x="656" y="258" class="t-dado surge" font-size="15" style="animation-delay:2s">→ 67,40</text>
+        <text x="736" y="258" class="t-dado f-ok surge" font-size="15" font-weight="600" style="animation-delay:3.4s">→ 0,00</text>
+        <g class="surge" style="animation-delay:3.9s">
+          <rect x="510" y="286" width="390" height="70" rx="10" class="f-suave"/>
+          <text x="530" y="328" font-size="18" font-weight="600">Troco</text>
+          <text x="880" y="334" text-anchor="end" class="t-disp" font-size="34">R$ 2,60</text>
+        </g>
+        <text x="510" y="386" class="tx-mudo surge" font-size="13" style="animation-delay:3.9s">calculado sozinho no pagamento em dinheiro</text>
+        <text x="40" y="466" class="tx-mudo surge" font-size="14" style="animation-delay:4.4s">Esc volta aos itens sem perder o que já foi pago</text>
+        <g class="cai" style="animation-delay:4.6s">
+          <g class="pulso" style="animation-delay:5.2s">
+            <rect x="600" y="432" width="320" height="58" rx="29" class="f-ok"/>
+            <text x="760" y="468" text-anchor="middle" class="tx-claro" font-size="20" font-weight="600">F5  Finalizar a venda</text>
+          </g>
+        </g>
+      </svg>
+
+      <!-- 9 · TEF -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11500" role="img" aria-label="F9 crédito, F10 débito e F11 PIX pelo TEF já trazem o valor restante; o pinpad aprova e a venda fecha sozinha">
+        <g class="surge" style="animation-delay:.2s"><rect x="40" y="40" width="135" height="100" rx="12" class="f-painel s-linha" stroke-width="2"/><text x="107" y="88" text-anchor="middle" class="t-disp f-rota" font-size="34">F9</text><text x="107" y="120" text-anchor="middle" font-size="16">Crédito</text></g>
+        <g class="surge" style="animation-delay:.5s"><rect x="190" y="40" width="135" height="100" rx="12" class="f-painel s-linha" stroke-width="2"/><text x="257" y="88" text-anchor="middle" class="t-disp f-rota" font-size="34">F10</text><text x="257" y="120" text-anchor="middle" font-size="16">Débito</text></g>
+        <g class="surge" style="animation-delay:.8s"><rect x="340" y="40" width="135" height="100" rx="12" class="f-painel s-linha" stroke-width="2"/><text x="407" y="88" text-anchor="middle" class="t-disp f-rota" font-size="34">F11</text><text x="407" y="120" text-anchor="middle" font-size="16">PIX</text></g>
+        <g class="surge" style="animation-delay:1.4s">
+          <rect x="40" y="160" width="435" height="160" rx="12" class="f-painel s-rota" stroke-width="2.5"/>
+          <text x="60" y="196" class="t-disp" font-size="23">TEF Crédito</text>
+          <text x="60" y="222" class="tx-mudo" font-size="14">o valor restante já vem preenchido</text>
+          <rect x="60" y="240" width="240" height="56" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <text x="78" y="276" class="t-dado" font-size="24">R$ 67,40</text>
+        </g>
+        <g class="cai" style="animation-delay:2.2s"><rect x="316" y="248" width="90" height="40" rx="8" class="f-rota"/><text x="361" y="274" text-anchor="middle" class="tx-escuro" font-size="16" font-weight="600">Enter</text></g>
+        <path class="sem-fill s-rota traco" style="--len:140;--dur:.7s;animation-delay:2.6s" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M485 250 H590 M578 238 l12 12 l-12 12"/>
+        <g class="surge" style="animation-delay:.6s">
+          <rect x="610" y="70" width="200" height="340" rx="24" class="f-painel s-linha" stroke-width="3"/>
+          <rect x="632" y="96" width="156" height="98" rx="8" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <g class="f-painel2">
+            <rect x="640" y="216" width="40" height="32" rx="6"/><rect x="690" y="216" width="40" height="32" rx="6"/><rect x="740" y="216" width="40" height="32" rx="6"/>
+            <rect x="640" y="258" width="40" height="32" rx="6"/><rect x="690" y="258" width="40" height="32" rx="6"/><rect x="740" y="258" width="40" height="32" rx="6"/>
+            <rect x="640" y="300" width="40" height="32" rx="6"/><rect x="690" y="300" width="40" height="32" rx="6"/><rect x="740" y="300" width="40" height="32" rx="6"/>
+          </g>
+          <rect x="640" y="342" width="40" height="32" rx="6" class="f-alerta"/><rect x="690" y="342" width="40" height="32" rx="6" class="f-painel2"/><rect x="740" y="342" width="40" height="32" rx="6" class="f-ok"/>
+        </g>
+        <g class="surge" style="animation-delay:3.1s"><text x="710" y="140" text-anchor="middle" class="t-dado" font-size="13">INSIRA OU</text><text x="710" y="160" text-anchor="middle" class="t-dado" font-size="13">APROXIME</text></g>
+        <g class="anda" style="--dx:-40px;--dy:0px;animation-delay:3.4s"><rect x="830" y="150" width="112" height="72" rx="8" class="f-azul"/><rect x="846" y="168" width="22" height="16" rx="3" class="f-aviso"/></g>
+        <circle cx="800" cy="186" r="22" class="sem-fill s-azul anel" stroke-width="3" style="animation-delay:5.2s;opacity:0"/>
+        <g class="surge" style="animation-delay:5.8s"><rect x="632" y="96" width="156" height="98" rx="8" class="f-ok"/><text x="710" y="152" text-anchor="middle" class="t-dado tx-claro" font-size="17" font-weight="600">APROVADO</text></g>
+        <g class="cai" style="animation-delay:6.5s"><rect x="590" y="430" width="330" height="54" rx="27" class="f-ok"/><text x="755" y="463" text-anchor="middle" class="tx-claro" font-size="18" font-weight="600">Pago? A venda fecha sozinha</text></g>
+        <g class="surge" style="animation-delay:7.4s">
+          <rect x="40" y="345" width="435" height="140" rx="12" class="f-painel s-alerta" stroke-width="2.5"/>
+          <circle cx="82" cy="390" r="20" class="f-alerta"/><text x="82" y="398" text-anchor="middle" class="t-disp tx-claro" font-size="24">!</text>
+          <text x="118" y="386" class="t-disp" font-size="21">PIX com confirmação manual</text>
+          <text x="118" y="420" font-size="16">só confirme depois de ver</text>
+          <text x="118" y="446" font-size="16">o dinheiro na conta</text>
+        </g>
+      </svg>
+
+      <!-- 10 · NFC-e com e sem internet -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="12500" role="img" aria-label="Com internet a NFC-e é autorizada e impressa; sem internet o caixa entra em contingência e transmite depois; F10 reimprime, retransmite e cancela em até 30 minutos">
+        <text x="40" y="66" class="t-disp f-ok surge" font-size="20" style="animation-delay:.2s">Com internet</text>
+        <g class="surge" style="animation-delay:.4s"><rect x="40" y="82" width="180" height="70" rx="10" class="f-painel s-linha" stroke-width="2"/><text x="130" y="123" text-anchor="middle" font-size="16" font-weight="600">Venda finalizada</text></g>
+        <g class="surge" style="animation-delay:1s"><rect x="262" y="82" width="160" height="70" rx="10" class="f-painel s-linha" stroke-width="2"/>
+          <path d="M282 98 h20 l8 8 v32 h-28 z" class="f-suave s-rota" stroke-width="2" stroke-linejoin="round"/><text x="320" y="123" font-size="16" font-weight="600">NFC-e</text></g>
+        <g class="surge" style="animation-delay:1.6s"><rect x="464" y="82" width="190" height="70" rx="10" class="f-painel s-ok" stroke-width="2"/><text x="482" y="123" font-size="16" font-weight="600">Sefaz autoriza</text>
+          <circle cx="626" cy="117" r="14" class="f-ok"/><path d="M619 117 l5 5 l9 -10" class="sem-fill" stroke="#fff" stroke-width="3" stroke-linecap="round"/></g>
+        <g class="surge" style="animation-delay:2.2s"><rect x="696" y="82" width="200" height="70" rx="10" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="714" y="104" width="40" height="26" rx="4" class="f-painel2 s-linha" stroke-width="2"/><rect x="722" y="96" width="24" height="10" class="f-painel s-linha" stroke-width="2"/><rect x="722" y="124" width="24" height="16" class="f-painel s-linha" stroke-width="2"/>
+          <text x="768" y="123" font-size="16" font-weight="600">Impressa</text></g>
+        <path class="sem-fill s-linha traco" style="--len:40;--dur:.3s;animation-delay:.9s" stroke-width="3" stroke-linecap="round" d="M224 117 H258"/>
+        <path class="sem-fill s-linha traco" style="--len:40;--dur:.3s;animation-delay:1.5s" stroke-width="3" stroke-linecap="round" d="M426 117 H460"/>
+        <path class="sem-fill s-linha traco" style="--len:40;--dur:.3s;animation-delay:2.1s" stroke-width="3" stroke-linecap="round" d="M658 117 H692"/>
+        <text x="40" y="208" class="t-disp f-alerta surge" font-size="20" style="animation-delay:3s">Sem internet</text>
+        <g class="surge" style="animation-delay:3.2s"><rect x="40" y="224" width="180" height="76" rx="10" class="f-painel s-alerta" stroke-width="2"/>
+          <path d="M60 280 a11 11 0 0 1 3 -22 a15 15 0 0 1 28 3 a10 10 0 0 1 -1 19 z" class="f-painel2" stroke-width="2" style="stroke:var(--mudo)"/>
+          <path d="M68 262 l14 14 M82 262 l-14 14" class="sem-fill s-alerta" stroke-width="3" stroke-linecap="round"/>
+          <text x="108" y="258" font-size="15" font-weight="600">Sefaz ou</text><text x="108" y="280" font-size="15" font-weight="600">rede fora</text></g>
+        <g class="cai" style="animation-delay:3.8s"><rect x="262" y="238" width="160" height="48" rx="24" class="f-aviso"/><text x="342" y="268" text-anchor="middle" class="tx-escuro" font-size="16" font-weight="600">Contingência</text></g>
+        <g class="surge" style="animation-delay:4.4s">
+          <rect x="484" y="226" width="40" height="52" rx="4" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="494" y="234" width="40" height="52" rx="4" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="504" y="242" width="40" height="52" rx="4" class="f-suave s-rota" stroke-width="2"/>
+          <text x="556" y="258" font-size="15" font-weight="600">notas</text><text x="556" y="280" font-size="15" font-weight="600">guardadas</text>
+        </g>
+        <g class="surge" style="animation-delay:5.2s"><rect x="696" y="224" width="200" height="76" rx="10" class="f-painel s-ok" stroke-width="2"/>
+          <text x="716" y="258" font-size="15" font-weight="600">voltou a rede:</text><text x="716" y="280" font-size="15" font-weight="600">transmite depois</text></g>
+        <path class="sem-fill s-linha traco" style="--len:40;--dur:.3s;animation-delay:3.7s" stroke-width="3" stroke-linecap="round" d="M224 262 H258"/>
+        <path class="sem-fill s-linha traco" style="--len:60;--dur:.3s;animation-delay:4.3s" stroke-width="3" stroke-linecap="round" d="M426 262 H478"/>
+        <path class="sem-fill s-ok traco" style="--len:60;--dur:.3s;animation-delay:5.1s" stroke-width="3" stroke-linecap="round" d="M648 262 H692"/>
+        <g class="surge" style="animation-delay:6.2s">
+          <rect x="40" y="336" width="880" height="160" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <rect x="60" y="356" width="62" height="38" rx="8" class="f-rota"/><text x="91" y="382" text-anchor="middle" class="t-disp tx-escuro" font-size="21">F10</text>
+          <text x="136" y="384" class="t-disp" font-size="24">Documentos fiscais</text>
+        </g>
+        <g class="cai" style="animation-delay:6.7s"><rect x="60" y="420" width="170" height="48" rx="24" class="f-painel2 s-linha" stroke-width="1.5"/><text x="145" y="450" text-anchor="middle" font-size="16" font-weight="600">Reimprimir</text></g>
+        <g class="cai" style="animation-delay:7s"><rect x="246" y="420" width="170" height="48" rx="24" class="f-painel2 s-linha" stroke-width="1.5"/><text x="331" y="450" text-anchor="middle" font-size="16" font-weight="600">Retransmitir</text></g>
+        <g class="cai" style="animation-delay:7.3s"><rect x="432" y="420" width="250" height="48" rx="24" class="f-painel2 s-alerta" stroke-width="2"/><text x="557" y="450" text-anchor="middle" font-size="16" font-weight="600">Cancelar até 30 minutos</text></g>
+        <g class="surge" style="animation-delay:7.6s">
+          <circle cx="740" cy="430" r="28" class="f-painel2 s-linha" stroke-width="2.5"/>
+          <circle cx="740" cy="430" r="3" style="fill:var(--tinta)"/>
+          <text x="780" y="424" font-size="15" font-weight="600">prazo da Sefaz</text>
+          <text x="780" y="446" class="tx-mudo" font-size="13">depois da autorização</text>
+        </g>
+        <path class="gira" style="--ang:180deg;animation-delay:7.8s;fill:var(--alerta);stroke:var(--alerta)" d="M738 430 L740 408 L742 430 Z" stroke-width="3" stroke-linejoin="round"/>
+      </svg>
+
+      <!-- 11 · sangria e suprimento -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11500" role="img" aria-label="F8 sangria retira dinheiro com motivo, F9 suprimento coloca troco; comprovante em duas vias, uma no caixa e outra no cofre">
+        <g class="surge" style="animation-delay:.2s">
+          <rect x="360" y="150" width="240" height="160" rx="12" class="f-painel s-linha" stroke-width="3"/>
+          <rect x="384" y="176" width="58" height="34" rx="4" class="f-suave s-rota" stroke-width="1.5"/>
+          <rect x="451" y="176" width="58" height="34" rx="4" class="f-suave s-rota" stroke-width="1.5"/>
+          <rect x="518" y="176" width="58" height="34" rx="4" class="f-suave s-rota" stroke-width="1.5"/>
+          <rect x="384" y="218" width="58" height="22" rx="4" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <rect x="451" y="218" width="58" height="22" rx="4" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <rect x="518" y="218" width="58" height="22" rx="4" class="f-painel2 s-linha" stroke-width="1.5"/>
+          <rect x="360" y="262" width="240" height="48" rx="10" class="f-painel2 s-linha" stroke-width="3"/>
+          <rect x="450" y="280" width="60" height="10" rx="5" class="f-mudo"/>
+          <text x="480" y="340" text-anchor="middle" class="tx-mudo" font-size="15">gaveta do caixa</text>
+        </g>
+        <g class="surge" style="animation-delay:1s">
+          <rect x="40" y="110" width="280" height="190" rx="12" class="f-painel s-alerta" stroke-width="2.5"/>
+          <rect x="60" y="128" width="52" height="36" rx="8" class="f-rota"/><text x="86" y="153" text-anchor="middle" class="t-disp tx-escuro" font-size="20">F8</text>
+          <text x="126" y="155" class="t-disp" font-size="24">Sangria</text>
+          <text x="60" y="214" class="t-disp f-alerta" font-size="34">− R$ 500,00</text>
+          <text x="60" y="248" class="tx-mudo" font-size="14">motivo: depósito no banco</text>
+          <text x="60" y="274" class="tx-mudo" font-size="14">retira dinheiro do caixa</text>
+        </g>
+        <path class="sem-fill s-alerta traco" style="--len:60;--dur:.4s;animation-delay:1.6s" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M354 205 H326 M336 195 l-10 10 l10 10"/>
+        <g class="surge" style="animation-delay:2.8s">
+          <rect x="640" y="110" width="280" height="190" rx="12" class="f-painel s-ok" stroke-width="2.5"/>
+          <rect x="660" y="128" width="52" height="36" rx="8" class="f-rota"/><text x="686" y="153" text-anchor="middle" class="t-disp tx-escuro" font-size="20">F9</text>
+          <text x="726" y="155" class="t-disp" font-size="24">Suprimento</text>
+          <text x="660" y="214" class="t-disp f-ok" font-size="34">+ R$ 100,00</text>
+          <text x="660" y="248" class="tx-mudo" font-size="14">quando falta troco</text>
+          <text x="660" y="274" class="tx-mudo" font-size="14">coloca dinheiro no caixa</text>
+        </g>
+        <path class="sem-fill s-ok traco" style="--len:60;--dur:.4s;animation-delay:3.4s" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M634 205 H606 M616 195 l-10 10 l10 10"/>
+        <g class="surge" style="animation-delay:4.6s">
+          <text x="40" y="408" class="t-disp" font-size="24">Comprovante</text>
+          <text x="40" y="434" class="tx-mudo" font-size="14">conferido na tela antes</text>
+          <text x="40" y="456" class="tx-mudo" font-size="14">de imprimir, em duas vias</text>
+        </g>
+        <g class="surge" style="animation-delay:5.2s">
+          <rect x="290" y="370" width="170" height="130" rx="6" class="f-painel s-linha" stroke-width="2"/>
+          <text x="375" y="398" text-anchor="middle" class="t-dado" font-size="13">1ª VIA · CAIXA</text>
+          <path d="M306 416 h138 M306 434 h110 M306 452 h138 M306 470 h90" class="sem-fill s-linha" stroke-width="3"/>
+        </g>
+        <g class="surge" style="animation-delay:5.7s">
+          <rect x="480" y="370" width="170" height="130" rx="6" class="f-painel s-linha" stroke-width="2"/>
+          <text x="565" y="398" text-anchor="middle" class="t-dado" font-size="13">2ª VIA · COFRE</text>
+          <path d="M496 416 h138 M496 434 h110 M496 452 h138 M496 470 h90" class="sem-fill s-linha" stroke-width="3"/>
+        </g>
+        <path class="sem-fill s-rota traco" style="--len:70;--dur:.4s;animation-delay:6.3s" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M660 435 H720 M710 425 l10 10 l-10 10"/>
+        <g class="cai" style="animation-delay:6.6s">
+          <rect x="740" y="380" width="120" height="110" rx="10" class="f-painel s-linha" stroke-width="3"/>
+          <circle cx="800" cy="428" r="24" class="f-painel2 s-linha" stroke-width="3"/>
+          <path d="M800 410 V428 L812 436" class="sem-fill s-rota" stroke-width="3" stroke-linecap="round"/>
+          <text x="800" y="480" text-anchor="middle" class="tx-mudo" font-size="13">cofre</text>
+        </g>
+      </svg>
+
+      <!-- 12 · fechamento e seguranca -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="13000" role="img" aria-label="F11 mostra o resumo do fechamento; depois de uma queda de energia a venda volta do ponto em que parou; o ciclo abrir, vender, receber e fechar">
+        <g class="surge" style="animation-delay:.2s">
+          <rect x="40" y="40" width="58" height="38" rx="8" class="f-rota"/><text x="69" y="66" text-anchor="middle" class="t-disp tx-escuro" font-size="21">F11</text>
+          <text x="112" y="68" class="t-disp" font-size="26">Fechamento</text>
+        </g>
+        <g class="surge" style="animation-delay:.6s">
+          <rect x="40" y="96" width="440" height="290" rx="12" class="f-painel s-linha" stroke-width="2"/>
+        </g>
+        <g class="surge" style="animation-delay:1s"><text x="64" y="144" font-size="16">Vendas (86)</text><text x="456" y="144" text-anchor="end" class="t-dado" font-size="17">7.420,50</text></g>
+        <g class="surge" style="animation-delay:1.4s"><text x="64" y="188" font-size="16">Sangrias</text><text x="456" y="188" text-anchor="end" class="t-dado f-alerta" font-size="17">− 1.500,00</text></g>
+        <g class="surge" style="animation-delay:1.8s"><text x="64" y="232" font-size="16">Suprimentos</text><text x="456" y="232" text-anchor="end" class="t-dado f-ok" font-size="17">+ 250,00</text></g>
+        <g class="surge" style="animation-delay:2.4s">
+          <path d="M64 262 H456" class="sem-fill s-linha" stroke-width="2"/>
+          <text x="64" y="300" font-size="17" font-weight="600">Saldo em dinheiro</text>
+          <text x="456" y="306" text-anchor="end" class="t-disp f-ok" font-size="32">R$ 1.180,00</text>
+          <text x="64" y="356" class="tx-mudo" font-size="14">confira com o dinheiro da gaveta</text>
+        </g>
+        <g class="cai" style="animation-delay:3.2s">
+          <rect x="40" y="410" width="300" height="54" rx="12" class="f-alerta"/>
+          <text x="190" y="443" text-anchor="middle" class="tx-claro" font-size="18" font-weight="600">Confirmar Fechamento</text>
+        </g>
+        <text x="356" y="443" class="tx-mudo surge" font-size="14" style="animation-delay:3.4s">com o caixa livre</text>
+        <g class="surge" style="animation-delay:4.4s">
+          <rect x="520" y="40" width="400" height="220" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <path d="M562 72 L546 108 H560 L552 140 L578 98 H564 L574 72 Z" class="f-aviso" stroke-linejoin="round"/>
+          <text x="594" y="110" class="t-disp" font-size="26">Faltou energia?</text>
+          <text x="546" y="164" font-size="16"><tspan class="f-rota" font-weight="600">1</tspan>  entre de novo no PDV</text>
+          <text x="546" y="194" font-size="16"><tspan class="f-rota" font-weight="600">2</tspan>  a venda volta de onde parou</text>
+        </g>
+        <g class="cai" style="animation-delay:5.6s"><rect x="546" y="210" width="300" height="36" rx="18" class="f-ok"/><text x="696" y="234" text-anchor="middle" class="tx-claro" font-size="16" font-weight="600">Venda #129 restaurada</text></g>
+        <g class="surge" style="animation-delay:6.6s"><rect x="520" y="280" width="400" height="220" rx="12" class="f-painel s-linha" stroke-width="2"/></g>
+        <path class="sem-fill s-rota traco" style="--len:450;--dur:2.2s;animation-delay:7s" stroke-width="5" stroke-linecap="round" d="M720 320 a70 70 0 1 1 -0.1 0"/>
+        <g class="cai" style="animation-delay:7.3s"><circle cx="720" cy="320" r="9" class="f-rota"/><text x="720" y="304" text-anchor="middle" class="t-disp" font-size="19">Abrir</text></g>
+        <g class="cai" style="animation-delay:7.8s"><circle cx="790" cy="390" r="9" class="f-rota"/><text x="808" y="396" class="t-disp" font-size="19">Vender</text></g>
+        <g class="cai" style="animation-delay:8.3s"><circle cx="720" cy="460" r="9" class="f-rota"/><text x="720" y="490" text-anchor="middle" class="t-disp" font-size="19">Receber</text></g>
+        <g class="cai" style="animation-delay:8.8s"><circle cx="650" cy="390" r="9" class="f-rota"/><text x="632" y="396" text-anchor="end" class="t-disp" font-size="19">Fechar</text></g>
+        <text x="720" y="398" text-anchor="middle" class="t-disp f-rota cai" font-size="22" style="animation-delay:9.4s">ApoloWeb</text>
+      </svg>
+
+    </div>
+
+    <div class="legenda" aria-live="polite">
+      <div>
+        <span class="num" id="lgNum">Cena 1 de 12</span>
+        <h2 id="lgTit"></h2>
+        <p id="lgTxt"></p>
+      </div>
+      <span class="rot" id="lgRot"></span>
+    </div>
+    <div class="controles">
+      <button class="btn" id="bAnt" type="button" aria-label="Cena anterior">◀</button>
+      <button class="btn prim" id="bPlay" type="button" aria-label="Pausar">❚❚ Pausar</button>
+      <button class="btn" id="bProx" type="button" aria-label="Próxima cena">▶</button>
+      <div class="trilho" id="trilho" role="tablist" aria-label="Cenas"></div>
+      <span class="tempo" id="tempo">0:00</span>
+    </div>
+  </section>
+
+  <aside id="coluna" aria-hidden="true">
+    <div class="marca">Colosso<b>ApoloWeb: a frente de caixa</b></div>
+    <ol id="indice"></ol>
+    <div id="avatarCard"></div>
+  </aside>
+
+  <h3 class="sec">Roteiro</h3>
+  <div class="roteiro" id="roteiro"></div>
+  <p class="rodape">Os números das cenas são exemplos ilustrativos. Use as setas do teclado para navegar e a barra de espaço para pausar. O texto de cada cena serve de locução para gravar o vídeo.</p>
+</div>
+
+<script id="temas-colosso-js">
+/* ---- temas.js (cópia) ---- */
+/* ===========================================================================
+   temas.js — seletor de temas COMPARTILHADO das rotinas web Colosso.
+
+   Origem dos temas: ROT8010 (BI). Este módulo é idêntico em todas as rotinas
+   geradas pela skill colosso-delphi-webview; a escolha persiste na chave
+   localStorage 'colosso.tema'. Como as rotinas compartilham a mesma pasta de
+   dados do WebView2 ('ColossoWebView'), o tema escolhido em uma rotina vale
+   para todas.
+
+   Uso: inclua <select id="selTema"></select> na topbar, carregue este script
+   antes do app.js e pronto — ele se auto-inicializa no DOMContentLoaded.
+   API (opcional): window.TEMAS_COLOSSO = { TEMAS, temaAuto, aplicar, iniciar }
+   Evento: 'temamudou' em document (detail: {id, efetivo}) para quem precisar
+   re-renderizar gráficos com a nova paleta (--chart-palette).
+   =========================================================================== */
+(function () {
+  const CHAVE = 'colosso.tema';
+
+  const TEMAS = [
+    { id: 'auto',        nome: '🗓️ Automático (época do ano)' },
+    { id: 'escuro',      nome: '🌙 Escuro' },
+    { id: 'claro',       nome: '☀️ Claro' },
+    { id: 'floresta',    nome: '🌲 Floresta' },
+    { id: 'florido',     nome: '🌸 Florido' },
+    { id: 'oceano',      nome: '🌊 Oceano' },
+    { id: 'cafe',        nome: '☕ Café' },
+    { id: 'natal',       nome: '🎄 Natal' },
+    { id: 'ano-novo',    nome: '🎆 Ano Novo' },
+    { id: 'carnaval',    nome: '🎭 Carnaval' },
+    { id: 'pascoa',      nome: '🐰 Páscoa' },
+    { id: 'maes',        nome: '💐 Dia das Mães' },
+    { id: 'pais',        nome: '👔 Dia dos Pais' },
+    { id: 'junina',      nome: '🎪 Festa Junina' },
+    { id: 'criancas',    nome: '🧸 Dia das Crianças' },
+    { id: 'halloween',   nome: '🎃 Halloween' },
+    { id: 'blackfriday', nome: '🛍️ Black Friday' }
+  ];
+
+  // Tema sugerido pela época do ano (datas aproximadas p/ festas móveis).
+  function temaAuto() {
+    const hoje = new Date();
+    const m = hoje.getMonth() + 1, d = hoje.getDate();
+    if (m === 12 && d <= 26) return 'natal';
+    if ((m === 12 && d > 26) || (m === 1 && d <= 7)) return 'ano-novo';
+    if (m === 2 || (m === 3 && d <= 7)) return 'carnaval';
+    if ((m === 3 && d >= 15) || (m === 4 && d <= 20)) return 'pascoa';
+    if (m === 5 && d <= 14) return 'maes';
+    if (m === 6) return 'junina';
+    if (m === 8 && d <= 14) return 'pais';
+    if (m === 10 && d <= 12) return 'criancas';
+    if (m === 10 && d >= 20) return 'halloween';
+    if (m === 11 && d >= 20) return 'blackfriday';
+    return 'escuro';
+  }
+
+  function aplicar(id, silencioso) {
+    const efetivo = (id === 'auto') ? temaAuto() : id;
+    document.documentElement.setAttribute('data-tema', efetivo);
+    try { localStorage.setItem(CHAVE, id); } catch (e) { /* file:// pode bloquear */ }
+    document.dispatchEvent(new CustomEvent('temamudou', { detail: { id, efetivo, silencioso: !!silencioso } }));
+  }
+
+  function iniciar(seletor) {
+    const sel = document.querySelector(seletor || '#selTema');
+    if (!sel) return;
+    sel.innerHTML = TEMAS.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+    let salvo = 'auto';
+    try { salvo = localStorage.getItem(CHAVE) || 'auto'; } catch (e) { }
+    if (!TEMAS.some(t => t.id === salvo)) salvo = 'auto';
+    sel.value = salvo;
+    aplicar(salvo, true);
+    sel.addEventListener('change', () => aplicar(sel.value));
+  }
+
+  window.TEMAS_COLOSSO = { TEMAS, temaAuto, aplicar, iniciar };
+  document.addEventListener('DOMContentLoaded', () => iniciar('#selTema'));
+})();
+
+/* Tema pela URL (?tema=claro) ou, na gravação, o escuro fixo. Roda depois do iniciar() do temas.js. */
+document.addEventListener('DOMContentLoaded', () => {
+  const m = /[?&]tema=([\w-]+)/.exec(location.search);
+  const video = /[?&](video|avatar)=1/.test(location.search);
+  const id = m ? m[1] : (video ? 'escuro' : null);
+  if (!id || !window.TEMAS_COLOSSO.TEMAS.some(t => t.id === id)) return;
+  window.TEMAS_COLOSSO.aplicar(id, true);
+  const sel = document.getElementById('selTema'); if (sel) sel.value = id;
+});
+</script>
+<script>
+(function(){
+  const CENAS=[   // t = título · r = rótulo (rotina/tela) · x = legenda; a ORDEM e a QUANTIDADE batem com as cenas do palco
+    {t:"Um caixa que não para",r:"visão geral",x:"O ApoloWeb registra os produtos, recebe o pagamento e emite a NFC-e. Mesmo sem internet, o caixa continua vendendo."},
+    {t:"O começo do dia",r:"Login · Abertura",x:"Login com matrícula e senha, sincronização com o servidor e abertura do caixa com o troco da gaveta."},
+    {t:"Conhecendo a tela",r:"Tela do PDV",x:"Cabeçalho, itens da venda, total e código de barras, teclas F1 a F12. Dois cliques no logotipo abrem a ajuda."},
+    {t:"Registrando os produtos",r:"Código de barras · F1",x:"O primeiro item inicia a venda. F1 busca pelo nome; quantidade, asterisco e o produto lançam várias unidades."},
+    {t:"Balança e produtos por peso",r:"Etiqueta de balança",x:"A etiqueta de 13 dígitos começa com 2: o PDV lê o preço e calcula o peso. Fração só para quilo ou metro."},
+    {t:"Cliente na nota",r:"F2 · Consumidor",x:"Com a venda iniciada, F2 e o CPF ou CNPJ. Com cadastro o nome aparece; sem cadastro o documento vai na nota."},
+    {t:"Descontos e cancelamentos",r:"F3 · ⇧F3 · F6 · F12",x:"Desconto no total ou no item, cancelar item ou a venda. Sem permissão, o caixa pede a senha do supervisor."},
+    {t:"Recebendo o pagamento",r:"F4 · Pagamento",x:"Várias formas na mesma venda: o restante diminui a cada pagamento, o troco aparece sozinho e F5 finaliza."},
+    {t:"Cartão e PIX no pinpad",r:"TEF · F9 F10 F11",x:"Os atalhos já trazem o valor restante; o pinpad aprova e a venda fecha sozinha. PIX manual: confirme só com o dinheiro na conta."},
+    {t:"A nota fiscal, com ou sem internet",r:"NFC-e · F10",x:"A nota é autorizada e impressa ao finalizar. Sem internet, contingência e transmissão depois. Cancelamento em até 30 minutos."},
+    {t:"O dinheiro do caixa",r:"F8 Sangria · F9 Suprimento",x:"Sangria com valor e motivo, suprimento quando falta troco. Comprovante conferido na tela e impresso em duas vias."},
+    {t:"Fechamento e segurança",r:"F11 · Fechamento",x:"O resumo mostra vendas, sangrias, suprimentos e saldo. Depois de uma queda de energia, a venda volta de onde parou."}
+  ];
+  const $=s=>document.querySelector(s);
+  const cenas=[...document.querySelectorAll('#palco svg.cena')];
+  const durs=cenas.map(c=>Number(c.dataset.dur)||9000);
+  const total=durs.reduce((a,b)=>a+b,0);
+  let atual=0, tocando=true, inicio=performance.now(), decorrido=0, raf=0;
+  const reduz=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // trilho e roteiro
+  $('#trilho').innerHTML=CENAS.map((c,i)=>`<button type="button" role="tab" aria-label="Cena ${i+1}: ${c.t}" data-i="${i}"><i></i></button>`).join('');
+  $('#roteiro').innerHTML=CENAS.map((c,i)=>`<button type="button" class="cap" data-i="${i}"><b>${String(i+1).padStart(2,'0')}</b><strong>${c.t}</strong><span>${c.x}</span></button>`).join('');
+  document.querySelectorAll('[data-i]').forEach(b=>b.addEventListener('click',()=>{ ir(+b.dataset.i); if(b.classList.contains('cap')) document.querySelector('.player').scrollIntoView({behavior:reduz?'auto':'smooth',block:'start'}); }));
+
+  function reiniciarAnimacoes(svg){ // recomeça as animações CSS da cena
+    svg.classList.remove('ativa'); void svg.getBoundingClientRect(); svg.classList.add('ativa');
+  }
+  function ir(i){
+    atual=(i+cenas.length)%cenas.length;
+    cenas.forEach((c,k)=>{ if(k===atual) reiniciarAnimacoes(c); else c.classList.remove('ativa'); });
+    const c=CENAS[atual];
+    $('#lgNum').textContent='Cena '+(atual+1)+' de '+cenas.length;
+    $('#lgTit').textContent=c.t; $('#lgTxt').textContent=c.x; $('#lgRot').textContent=c.r;
+    document.querySelectorAll('#trilho button').forEach((b,k)=>{ b.classList.toggle('feito',k<atual); b.setAttribute('aria-selected',k===atual); b.querySelector('i').style.width=k<atual?'100%':'0'; });
+    document.querySelectorAll('.cap').forEach((b,k)=>b.classList.toggle('atual',k===atual));
+    document.querySelectorAll('#indice li').forEach((li,k)=>{ li.classList.toggle('feito',k<atual); li.classList.toggle('atual',k===atual); });
+    decorrido=0; inicio=performance.now();
+  }
+  function fmt(ms){ const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+  function tick(t){
+    if(tocando){
+      decorrido=t-inicio;
+      const d=durs[atual];
+      const barra=document.querySelectorAll('#trilho button i')[atual];
+      if(barra) barra.style.width=Math.min(100,decorrido/d*100)+'%';
+      const antes=durs.slice(0,atual).reduce((a,b)=>a+b,0);
+      $('#tempo').textContent=fmt(antes+Math.min(decorrido,d))+' / '+fmt(total);
+      if(decorrido>=d) ir(atual+1);
+    }
+    raf=requestAnimationFrame(tick);
+  }
+  function alternar(){
+    tocando=!tocando;
+    if(tocando){ inicio=performance.now()-decorrido; }
+    document.querySelectorAll('#palco svg.cena').forEach(c=>c.style.setProperty('--estado',''));
+    document.querySelectorAll('#palco svg.cena.ativa *').forEach(e=>{ e.style.animationPlayState=tocando?'running':'paused'; });
+    $('#bPlay').innerHTML=tocando?'❚❚ Pausar':'▶ Tocar';
+    $('#bPlay').setAttribute('aria-label',tocando?'Pausar':'Tocar');
+  }
+  $('#bPlay').addEventListener('click',alternar);
+  $('#bAnt').addEventListener('click',()=>ir(atual-1));
+  $('#bProx').addEventListener('click',()=>ir(atual+1));
+  document.addEventListener('keydown',e=>{
+    if(e.target.closest('input,textarea'))return;
+    if(e.key==='ArrowRight'){e.preventDefault();ir(atual+1);}
+    else if(e.key==='ArrowLeft'){e.preventDefault();ir(atual-1);}
+    else if(e.key===' '){e.preventDefault();alternar();}
+  });
+  $('#indice').innerHTML=CENAS.map(c=>'<li>'+c.t+'</li>').join('');
+  if(/[?&]video=1/.test(location.search)) document.body.classList.add('video');          // gravação 1920×1080
+  if(/[?&]avatar=1/.test(location.search)) document.body.classList.add('video','com-avatar');
+  window.__ir=ir; window.__durs=durs; ir(0);
+  if(!document.body.classList.contains('video')) raf=requestAnimationFrame(tick);
+})();
+</script>
+<div id="vbar"></div></body></html>

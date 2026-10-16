@@ -12,3 +12,8 @@ WebView2Cache/
 
 # IDE
 *.~*
+
+# Local / gerados
+*.bak
+*.mp4
+.claude/settings.local.json
