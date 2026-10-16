@@ -252,3 +252,114 @@
   50%  { transform: translateX(150%); }
   100% { transform: translateX(350%); }
 }
+
+/* ===== MODAL AJUDA (duplo clique no logotipo) ===== */
+.ajuda-content {
+  width: min(1040px, 94vw);
+  height: 88vh;
+}
+.ajuda-content .modal-header { gap: 16px; }
+.ajuda-content .modal-header h2 { white-space: nowrap; }
+.ajuda-busca { flex: 1; max-width: 420px; margin-left: auto; }
+.ajuda-busca input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+.ajuda-busca input:focus { outline: none; border-color: var(--border-focus); }
+
+.ajuda-body {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 24px;
+  padding: 0;
+  overflow: hidden;
+}
+.ajuda-sumario {
+  overflow-y: auto;
+  padding: 20px 0 20px 16px;
+  border-right: 1px solid var(--border-color);
+}
+.ajuda-sumario a {
+  display: block;
+  padding: 7px 12px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ajuda-sumario a:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ajuda-sumario a.ativo { background: var(--bg-active); color: var(--text-primary); font-weight: 600; }
+.ajuda-sumario a.hidden { display: none; }
+
+.ajuda-texto {
+  overflow-y: auto;
+  padding: 20px 28px 40px 0;
+  line-height: 1.55;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+.ajuda-texto section { margin-bottom: 32px; scroll-margin-top: 12px; }
+.ajuda-texto section.hidden { display: none; }
+.ajuda-texto h2 {
+  font-size: 1.2rem;
+  color: var(--accent-primary);
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+.ajuda-texto h3 { font-size: 1rem; margin: 18px 0 8px; }
+.ajuda-texto p { margin: 0 0 10px; }
+.ajuda-texto ul, .ajuda-texto ol { margin: 0 0 12px; padding-left: 22px; }
+.ajuda-texto li { margin-bottom: 6px; }
+.ajuda-texto table { width: 100%; border-collapse: collapse; margin: 6px 0 14px; font-size: 0.9rem; }
+.ajuda-texto th, .ajuda-texto td {
+  text-align: left;
+  vertical-align: top;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+.ajuda-texto th { color: var(--text-secondary); font-weight: 600; background: var(--bg-tertiary); }
+.ajuda-texto td:first-child { white-space: nowrap; }
+.ajuda-texto kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 6px;
+  border: 1px solid var(--border-color);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  text-align: center;
+}
+.ajuda-texto .aj-dica,
+.ajuda-texto .aj-atencao {
+  margin: 10px 0 14px;
+  padding: 10px 14px;
+  border-left: 4px solid var(--accent-info);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.ajuda-texto .aj-atencao { border-left-color: var(--accent-warning); }
+.ajuda-texto .aj-dica::before { content: "Dica: "; font-weight: 700; color: var(--accent-info); }
+.ajuda-texto .aj-atencao::before { content: "Aten\00E7\00E3o: "; font-weight: 700; color: var(--accent-warning); }
+.ajuda-texto details {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.ajuda-texto summary { padding: 9px 14px; cursor: pointer; font-weight: 600; }
+.ajuda-texto details p { padding: 0 14px 10px; margin: 0; }
+.ajuda-vazio { color: var(--text-secondary); font-style: italic; }
+.ajuda-rodape { margin-right: auto; font-size: 0.8rem; color: var(--text-muted); }
+
+/* Logotipo (login e cabecalho do PDV) abre a ajuda com duplo clique */
+.ajuda-gatilho { cursor: help; user-select: none; }

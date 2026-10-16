@@ -17,6 +17,7 @@ const ApoloApp = {
     NFCePanel.init();
     Reports.init();
     Screensaver.init();
+    Ajuda.init();
     Utils.initCurrencyMasks();
 
     // Bind close buttons nos modais

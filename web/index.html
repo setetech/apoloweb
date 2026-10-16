@@ -985,6 +985,251 @@
     </div>
   </div>
 
+  <!-- ===== MODAL AJUDA (duplo clique no logotipo) =====
+       Manual do operador. O texto daqui tambem vira a base de conhecimento
+       (Docs\ApoloWeb-ajuda.md, skill colosso-ajuda-rag): o que e so tela fica
+       com data-rag="fora". Sumario e busca sao montados por js/ajuda.js a
+       partir dos <section> / <h2>. -->
+  <div id="modal-ajuda" class="modal hidden">
+    <div class="modal-content ajuda-content">
+      <div class="modal-header" data-rag="fora">
+        <h2>Ajuda do PDV</h2>
+        <div class="ajuda-busca">
+          <input type="search" id="ajuda-filtro" placeholder="Procurar na ajuda (ex: sangria, troco, CPF)" autocomplete="off">
+        </div>
+        <button class="btn-close" data-close-modal="modal-ajuda" title="Fechar (ESC)">&times;</button>
+      </div>
+      <div class="modal-body ajuda-body">
+        <nav class="ajuda-sumario" id="ajuda-sumario"></nav>
+        <div class="ajuda-texto" id="ajuda-texto">
+          <p class="ajuda-vazio hidden" id="ajuda-vazio" data-rag="fora">Nenhum trecho da ajuda tem esse texto.</p>
+
+          <section id="aj-visao">
+            <h2>Visão geral da tela</h2>
+            <p>
+              O ApoloWeb é a frente de caixa (PDV) da loja: registra os itens, recebe o pagamento e
+              emite a NFC-e. Tudo se faz pelo teclado: o leitor de código de barras e as teclas
+              <kbd>F1</kbd> a <kbd>F12</kbd> resolvem a venda inteira, sem precisar do mouse.
+            </p>
+            <table>
+              <thead><tr><th>Parte da tela</th><th>O que mostra</th></tr></thead>
+              <tbody>
+                <tr><td>Cabeçalho (esquerda)</td><td>Logotipo da loja, versão do programa e número do caixa. Um duplo clique no logotipo abre esta ajuda.</td></tr>
+                <tr><td>Cabeçalho (centro)</td><td>Situação da conexão (<b>ONLINE</b> ou <b>CONTINGENCIA</b>), cupom em andamento e o consumidor identificado.</td></tr>
+                <tr><td>Cabeçalho (direita)</td><td>Operador logado, relógio e o botão 🎨 para trocar o tema de cores.</td></tr>
+                <tr><td>Itens do Cupom</td><td>Os itens da venda. Item cancelado fica riscado; a linha marcada é o item selecionado.</td></tr>
+                <tr><td>Resumo</td><td>Subtotal, desconto, acréscimo e o TOTAL da venda. No pagamento aparecem também Total Pago, Restante e Troco.</td></tr>
+                <tr><td>Código de Barras / Produto</td><td>Campo onde se lê ou digita o produto, e o campo <b>Vend</b> para a matrícula do vendedor.</td></tr>
+                <tr><td>Barra de funções</td><td>Os atalhos F1 a F12. Clicar no botão faz o mesmo que a tecla.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="aj-dia">
+            <h2>O dia do caixa, passo a passo</h2>
+            <ol>
+              <li><b>Login</b>: informe a matrícula e a senha. O PDV sincroniza os dados com o servidor antes de liberar a tela.</li>
+              <li><b>Abertura do caixa</b>: se o caixa estiver fechado, informe o valor do suprimento inicial (o troco que está na gaveta) e tecle <kbd>Enter</kbd>.</li>
+              <li><b>Vendas</b>: leia o primeiro produto e a venda começa sozinha. Feche cada venda com <kbd>F4</kbd> (pagamento).</li>
+              <li><b>Durante o dia</b>: retire dinheiro com <kbd>F8</kbd> (sangria) e reforce o troco com <kbd>F9</kbd> (suprimento).</li>
+              <li><b>Fechamento</b>: com o caixa livre, tecle <kbd>F11</kbd>, confira o resumo e confirme.</li>
+            </ol>
+            <div class="aj-dica">
+              Se faltar energia ou o PDV for fechado no meio de uma venda, basta entrar de novo: a venda
+              em andamento é restaurada com os itens e pagamentos já registrados.
+            </div>
+          </section>
+
+          <section id="aj-itens">
+            <h2>Registrar itens</h2>
+            <ul>
+              <li>Leia o código de barras ou digite o código do produto e tecle <kbd>Enter</kbd>.</li>
+              <li>Não sabe o código? Tecle <kbd>F1</kbd>, procure pelo nome, código ou código de barras, escolha com as setas e tecle <kbd>Enter</kbd>.</li>
+              <li><b>Quantidade</b>: digite a quantidade, o asterisco e depois o produto. Exemplo: <kbd>3*</kbd> e em seguida o código lança 3 unidades. A quantidade pendente aparece em <b>Qtd</b> embaixo do campo; <kbd>*</kbd> sozinho volta para 1.</li>
+              <li><b>Quantidade fracionada</b> (ex.: <kbd>0,750*</kbd>) só é aceita para produtos vendidos em KG ou metro.</li>
+              <li><b>Etiqueta de balança</b> (13 dígitos começando com 2): o PDV lê o preço da etiqueta e calcula o peso sozinho.</li>
+              <li><b>Produto de peso variável</b> lido sem etiqueta: o PDV pede o peso.</li>
+              <li><b>Vendedor</b>: informe a matrícula no campo <b>Vend</b> antes de ler os itens; o nome aparece ao lado e vale para os itens seguintes.</li>
+              <li>Clique numa linha da grade para selecionar o item: ele passa a ser o sugerido no desconto por item e no cancelamento de item.</li>
+            </ul>
+          </section>
+
+          <section id="aj-teclas">
+            <h2>Teclas de função</h2>
+            <table>
+              <thead><tr><th>Tecla</th><th>Função</th><th>Quando usar</th></tr></thead>
+              <tbody>
+                <tr><td><kbd>F1</kbd></td><td>Produto</td><td>Buscar produto pelo nome, código ou código de barras.</td></tr>
+                <tr><td><kbd>F2</kbd></td><td>Cliente</td><td>Identificar o consumidor (CPF/CNPJ na nota) ou escolher um cliente cadastrado.</td></tr>
+                <tr><td><kbd>F3</kbd></td><td>Desconto</td><td>Desconto em valor sobre o total da venda.</td></tr>
+                <tr><td><kbd>Shift</kbd>+<kbd>F3</kbd></td><td>Desc. Item</td><td>Desconto em um item, em R$ ou em %.</td></tr>
+                <tr><td><kbd>F4</kbd></td><td>Pagamento</td><td>Abrir a tela de pagamento da venda em andamento.</td></tr>
+                <tr><td><kbd>F5</kbd></td><td>Carga Geral</td><td>Baixar de novo todos os dados do servidor (produtos, preços, clientes). Use com o caixa livre.</td></tr>
+                <tr><td><kbd>F6</kbd></td><td>Cancelar Item</td><td>Cancelar um item da venda pelo número dele.</td></tr>
+                <tr><td><kbd>F7</kbd></td><td>Pré-Venda</td><td>Ainda em desenvolvimento.</td></tr>
+                <tr><td><kbd>F8</kbd></td><td>Sangria</td><td>Retirar dinheiro do caixa.</td></tr>
+                <tr><td><kbd>F9</kbd></td><td>Suprimento</td><td>Colocar dinheiro (troco) no caixa.</td></tr>
+                <tr><td><kbd>F10</kbd></td><td>NFCe</td><td>Documentos fiscais e configurações do caixa (TEF, impressora, logotipo).</td></tr>
+                <tr><td><kbd>F11</kbd></td><td>Fechar Cx</td><td>Fechamento do caixa no fim do expediente.</td></tr>
+                <tr><td><kbd>F12</kbd></td><td>Cancelar Venda</td><td>Cancelar a venda inteira.</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Voltar</td><td>Fecha a janela aberta e devolve o cursor ao campo do código de barras.</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>Sair</td><td>Encerrar o PDV.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="aj-descontos">
+            <h2>Descontos e cancelamentos</h2>
+            <ul>
+              <li><b>Desconto na venda</b> (<kbd>F3</kbd>): informe o valor em reais. Vale durante o registro e no pagamento.</li>
+              <li><b>Desconto no item</b> (<kbd>Shift</kbd>+<kbd>F3</kbd>): confirme o número do item (já vem o selecionado) e digite o desconto em reais (<kbd>2,50</kbd>) ou em percentual (<kbd>10%</kbd>). Zero remove o desconto do item. Só durante o registro.</li>
+              <li><b>Cancelar item</b> (<kbd>F6</kbd>): informe o número do item. Ele continua na grade, riscado, e sai do total.</li>
+              <li><b>Cancelar venda</b> (<kbd>F12</kbd>): confirma e cancela a venda inteira.</li>
+            </ul>
+            <div class="aj-atencao">
+              Desconto, cancelamento, sangria e fechamento podem exigir <b>autorização</b>. Quando o
+              operador não tem a permissão, o PDV pede a matrícula e a senha de um autorizador
+              (supervisor) e só segue depois que ela for aceita.
+            </div>
+            <div class="aj-dica">
+              <kbd>F12</kbd> com o caixa livre também serve para destravar o caixa que ficou marcado como
+              "venda em andamento" depois de uma queda de energia.
+            </div>
+          </section>
+
+          <section id="aj-cliente">
+            <h2>CPF/CNPJ na nota e cliente</h2>
+            <p>
+              Tecle <kbd>F2</kbd> com a venda já iniciada (pelo menos um item lido). Digite o CPF ou CNPJ e
+              clique em <b>Identificar</b>:
+            </p>
+            <ul>
+              <li>Se o cliente é cadastrado, o nome aparece no cabeçalho do PDV.</li>
+              <li>Se não é, o documento é gravado na venda e a nota sai com o consumidor padrão.</li>
+            </ul>
+            <p>Para escolher um cliente cadastrado, use a busca da mesma tela, pelo nome, CPF/CNPJ ou código.</p>
+          </section>
+
+          <section id="aj-pagamento">
+            <h2>Pagamento</h2>
+            <p>
+              Tecle <kbd>F4</kbd>. Escolha a forma de pagamento, informe o valor e registre com
+              <kbd>Enter</kbd> ou <kbd>F8</kbd>. Dá para combinar várias formas na mesma venda: cada
+              pagamento entra na lista e o <b>Restante</b> diminui. Com tudo pago, finalize com
+              <kbd>F5</kbd>. <kbd>Esc</kbd> volta para o registro de itens sem perder o que já foi pago.
+            </p>
+            <table>
+              <thead><tr><th>Tecla</th><th>Forma</th><th>Observações</th></tr></thead>
+              <tbody>
+                <tr><td><kbd>F1</kbd></td><td>Dinheiro</td><td>Informe o valor recebido; o troco aparece no resumo.</td></tr>
+                <tr><td><kbd>F2</kbd></td><td>Cheque</td><td>Banco, agência, conta e número do cheque são obrigatórios.</td></tr>
+                <tr><td><kbd>F3</kbd></td><td>Cartão ou TEF</td><td>Com TEF habilitado, o pinpad é acionado. Sem TEF, digite os dados do comprovante (tipo, bandeira, parcelas, NSU, autorização).</td></tr>
+                <tr><td><kbd>F4</kbd></td><td>PIX</td><td>Mostra o QR Code para o cliente pagar (quando o TEF está habilitado, o PIX vai pelo TEF).</td></tr>
+                <tr><td><kbd>F5</kbd></td><td>Cobrança</td><td>Na aba, escolha o meio de pagamento, o plano e os vencimentos das parcelas. Fora da aba, a tecla finaliza a venda.</td></tr>
+                <tr><td><kbd>F6</kbd></td><td>POS</td><td>Cartão passado numa maquininha que não é integrada ao PDV.</td></tr>
+              </tbody>
+            </table>
+            <h3>Atalhos do TEF</h3>
+            <p>
+              Com TEF habilitado, <kbd>F9</kbd> (crédito), <kbd>F10</kbd> (débito) e <kbd>F11</kbd> (PIX)
+              já trazem o valor restante: confirme com <kbd>Enter</kbd> e o pinpad é acionado na hora. O
+              atalho é sempre à vista; para parcelar, use a aba (<kbd>F3</kbd>). Quando o TEF aprova e não
+              sobra nada a pagar, a venda é finalizada sozinha. <kbd>Esc</kbd> pede o cancelamento da
+              transação em curso.
+            </p>
+            <h3>PIX com QR Code</h3>
+            <ul>
+              <li>Com a cobrança PIX dinâmica configurada, a confirmação é automática: a tela fecha sozinha quando o banco confirma.</li>
+              <li>Sem ela, o QR é o da chave da loja e o operador confirma com <kbd>Enter</kbd>.</li>
+              <li><kbd>F7</kbd> imprime o QR Code para o cliente.</li>
+            </ul>
+            <div class="aj-atencao">
+              No PIX com confirmação manual, só tecle <kbd>Enter</kbd> depois de ver o pagamento
+              recebido. Confirmar antes registra uma venda que pode não ter sido paga.
+            </div>
+            <p>Ao finalizar, a NFC-e é gerada e impressa, e o caixa volta a ficar livre.</p>
+          </section>
+
+          <section id="aj-caixa">
+            <h2>Sangria, suprimento e fechamento</h2>
+            <ul>
+              <li><b>Sangria</b> (<kbd>F8</kbd>): informe o valor retirado e o motivo.</li>
+              <li><b>Suprimento</b> (<kbd>F9</kbd>): informe o valor colocado no caixa.</li>
+              <li>Os dois mostram o comprovante antes de imprimir; saem 2 vias, uma para o caixa e outra para o cofre.</li>
+              <li><b>Fechamento</b> (<kbd>F11</kbd>): só com o caixa livre (sem venda aberta). Mostra a quantidade e o total de vendas, as sangrias, os suprimentos e o saldo em dinheiro. Confira e clique em <b>Confirmar Fechamento</b>.</li>
+            </ul>
+          </section>
+
+          <section id="aj-nfce">
+            <h2>NFC-e e configurações do caixa (F10)</h2>
+            <table>
+              <thead><tr><th>Aba</th><th>Para que serve</th></tr></thead>
+              <tbody>
+                <tr><td>Pendentes</td><td>Notas que ainda não foram autorizadas pela SEFAZ. <b>Retransmitir Pendentes</b> envia de novo; as rejeitadas podem ser marcadas para <b>Regerar</b> ou <b>Descartar</b>.</td></tr>
+                <tr><td>Notas do Dia</td><td>NFC-e autorizadas hoje. <b>Reimprimir</b> tira a 2ª via a qualquer momento. <b>Cancelar</b> só é aceito pela SEFAZ até 30 minutos depois da autorização, e estorna também o cartão da venda. Venda fechada sem nota aparece aqui com o botão <b>Emitir NFCe</b>.</td></tr>
+                <tr><td>Contingência</td><td>Quando a SEFAZ está fora do ar: escolha o tipo, escreva a justificativa e entre em contingência. Ao normalizar, saia da contingência e retransmita as pendentes.</td></tr>
+                <tr><td>Logotipo</td><td>Imagem impressa no topo do DANFCe e mostrada no cabeçalho do PDV. Aqui também se liga o protetor de tela, que mostra o logotipo com o caixa parado.</td></tr>
+                <tr><td>TEF</td><td>Configuração da integração com o pinpad, menu administrativo do gerenciador e as transações do dia, com <b>Estornar</b> e 2ª via do comprovante.</td></tr>
+                <tr><td>Impressora</td><td>Impressora do cupom e o modo de impressão; <b>Imprimir Teste</b> confere a configuração.</td></tr>
+              </tbody>
+            </table>
+            <div class="aj-atencao">
+              Não use o menu administrativo do TEF para vender nem para estornar: a transação feita lá não
+              passa pelo caixa e não gera cupom. Para desfazer um cartão, use <b>Estornar</b> na linha
+              da transação, na aba TEF.
+            </div>
+          </section>
+
+          <section id="aj-problemas">
+            <h2>Dúvidas e problemas comuns</h2>
+            <details>
+              <summary>O cabeçalho mostra CONTINGENCIA. E agora?</summary>
+              <p>
+                O PDV continua vendendo normalmente e as notas ficam guardadas. Quando a comunicação
+                voltar, abra <kbd>F10</kbd> › <b>Contingência</b>, saia da contingência e retransmita as
+                pendentes.
+              </p>
+            </details>
+            <details>
+              <summary>Apareceu "Venda fechada sem NFCe".</summary>
+              <p>
+                A venda foi gravada, mas a nota não saiu. Abra <kbd>F10</kbd> › <b>Notas do Dia</b> e use
+                <b>Emitir NFCe</b> na linha do cupom.
+              </p>
+            </details>
+            <details>
+              <summary>O TEF não respondeu.</summary>
+              <p>
+                Confira no pinpad e no gerenciador se a transação foi aprovada antes de tentar de novo.
+                Em <kbd>F10</kbd> › <b>TEF</b>, as transações do dia mostram o que foi aprovado.
+              </p>
+            </details>
+            <details>
+              <summary>"Produto não permite quantidade fracionada".</summary>
+              <p>Quantidade com vírgula só vale para produto vendido em KG ou metro. Lance a quantidade inteira.</p>
+            </details>
+            <details>
+              <summary>O preço ou o produto está desatualizado no caixa.</summary>
+              <p>Com o caixa livre, tecle <kbd>F5</kbd> (Carga Geral) para baixar de novo todos os dados do servidor.</p>
+            </details>
+            <details>
+              <summary>O PDV diz que já existe uma venda em andamento, mas a tela está vazia.</summary>
+              <p>Tecle <kbd>F12</kbd> com o caixa livre. O PDV restaura o estado do caixa, pedindo autorização se encontrar um cupom aberto.</p>
+            </details>
+            <details>
+              <summary>Como troco as cores da tela?</summary>
+              <p>Clique no botão 🎨 no canto direito do cabeçalho e escolha o tema. A escolha fica gravada neste caixa.</p>
+            </details>
+          </section>
+        </div>
+      </div>
+      <div class="modal-footer" data-rag="fora">
+        <span class="ajuda-rodape">Duplo clique no logotipo abre esta ajuda</span>
+        <button class="btn btn-secondary" data-close-modal="modal-ajuda">Fechar (ESC)</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== OVERLAY SINCRONIZACAO ===== -->
   <div id="sync-overlay" class="sync-overlay hidden">
     <div class="sync-content">
@@ -1014,6 +1259,7 @@
   <script src="js/nfce.js"></script>
   <script src="js/screensaver.js"></script>
   <script src="js/reports.js"></script>
+  <script src="js/ajuda.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
