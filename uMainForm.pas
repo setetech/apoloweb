@@ -34,14 +34,6 @@ type
     FNFCeManager: TNFCeWebManager;
     FMonitorConexao: TMonitorConexao;
     FSincronizador: TSincronizador;
-    // Download Oracle -> SQLite (sync automatica e F5) com conexao SQLite
-    // PROPRIA. Os threads de sync usavam a FSQLite da tela: um TUniConnection
-    // em dois threads ao mesmo tempo da Access Violation (log de 29/09 12:19),
-    // e o BEGIN TRANSACTION do download engolia na mesma transacao o que a
-    // venda gravasse no meio - um ROLLBACK levava junto. So os threads de
-    // sync usam (um por vez, FSincronizando); abertos dentro do thread.
-    FSQLiteSync: TSQLiteDB;
-    FSincronizadorDownload: TSincronizador;
     // Envios para o Oracle (venda, XML, pendentes) fora do thread da tela
     FUploadWorker: TUploadWorker;
     FSincronizando: Boolean;
@@ -117,9 +109,6 @@ begin
     FContingencia := TContingenciaManager.Create(FSQLite);
     FSincronizador := TSincronizador.Create(FSQLite);
     FUploadWorker := TUploadWorker.Create(FSQLite.DBPath);
-    // Criados aqui na thread principal (o TSincronizador tem um TTimer)
-    FSQLiteSync := TSQLiteDB.Create(FSQLite.DBPath);
-    FSincronizadorDownload := TSincronizador.Create(FSQLiteSync);
 
     // NFCe Manager (depende do ACBr no DataModule)
     if Assigned(DmApoloWeb) and Assigned(DmApoloWeb.ACBrNFe) then
@@ -187,13 +176,6 @@ begin
     FMonitorConexao.Free;
   end;
   FSincronizador.Free;
-  // Com um sync no ar o thread ainda usa os dois: liberar agora seria AV no
-  // fechamento. O processo termina e leva tudo.
-  if not FSincronizando then
-  begin
-    FSincronizadorDownload.Free;
-    FSQLiteSync.Free;
-  end;
   // Preso numa chamada ao Oracle o thread nao responde ao Terminate; esperar
   // o timeout de rede aqui travaria o fechamento. Nesse caso fica sem Free - o
   // processo termina e leva o thread, e o cupom sobe no proximo start.
@@ -913,8 +895,7 @@ begin
 
   // Capturar dados na main thread
   LConnStr := DmApoloWeb.UniConnOracle.ConnectString;
-  LSincronizador := FSincronizadorDownload;
-  var LSQLiteSync := FSQLiteSync;
+  LSincronizador := FSincronizador;
 
   TThread.CreateAnonymousThread(
     procedure
@@ -922,8 +903,6 @@ begin
       LConn: TUniConnection;
     begin
       try
-        if not LSQLiteSync.EstaAberto then
-          LSQLiteSync.AbrirBanco;
         LConn := TUniConnection.Create(nil);
         try
           LConn.ConnectString := LConnStr;
@@ -979,8 +958,7 @@ begin
   FSincronizando := True;
 
   var LConnStr := DmApoloWeb.UniConnOracle.ConnectString;
-  var LSincronizador := FSincronizadorDownload;
-  var LSQLiteSync := FSQLiteSync;
+  var LSincronizador := FSincronizador;
 
   TThread.CreateAnonymousThread(
     procedure
@@ -988,8 +966,6 @@ begin
       LConn: TUniConnection;
     begin
       try
-        if not LSQLiteSync.EstaAberto then
-          LSQLiteSync.AbrirBanco;
         LConn := TUniConnection.Create(nil);
         try
           LConn.ConnectString := LConnStr;
