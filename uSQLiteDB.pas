@@ -75,6 +75,11 @@ begin
   FConnection.SpecificOptions.Values['EnableSharedCache'] := 'False';
   // Sem BusyTimeout qualquer lock momentaneo vira "database is locked"
   FConnection.SpecificOptions.Values['BusyTimeout'] := '8000';
+  // O padrao do UniDAC e' lmExclusive: a conexao nunca solta o lock do
+  // arquivo. A da tela pegava o lock na primeira escrita e a fila de upload
+  // (conexao propria, outro thread) ficava presa ao abrir o banco - de 23/09
+  // a 16/10 nenhuma venda subiu. Em WAL, lmNormal deixa as duas conviverem.
+  FConnection.SpecificOptions.Values['LockingMode'] := 'lmNormal';
   FConnection.LoginPrompt := False;
 end;
 

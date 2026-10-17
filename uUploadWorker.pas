@@ -46,7 +46,11 @@ type
     FConnectString: string;
     FOpcoesOracle: string;
     FReconfigurar: Boolean;
+    // Onde o thread esta agora (diagnostico de travamento)
+    FEtapa: string;
+    FEtapaDesde: TDateTime;
 
+    procedure Etapa(const AEtapa: string; ALogar: Boolean = False);
     procedure Enfileirar(ATipo: TTipoUpload; ACupomId: Integer);
     function ProximoJob(out AJob: TJobUpload): Boolean;
     function GarantirConexao: Boolean;
@@ -74,6 +78,9 @@ type
     /// chamada ao Oracle; nesse caso NAO liberar o objeto (o processo termina
     /// e leva o thread junto; o cupom fica pendente para o proximo start).
     function Parar(ATimeoutMs: Cardinal): Boolean;
+
+    /// Etapa em que o thread esta e desde quando (para o log do fechamento)
+    function EtapaAtual: string;
   end;
 
 implementation
@@ -126,6 +133,32 @@ begin
   Terminate;
   FEvento.SetEvent;
   Result := WaitForSingleObject(Handle, ATimeoutMs) = WAIT_OBJECT_0;
+end;
+
+procedure TUploadWorker.Etapa(const AEtapa: string; ALogar: Boolean);
+begin
+  FLock.Enter;
+  try
+    FEtapa := AEtapa;
+    FEtapaDesde := Now;
+  finally
+    FLock.Leave;
+  end;
+  if ALogar then
+    SyncLog('UPLOAD fila: %s', [AEtapa]);
+end;
+
+function TUploadWorker.EtapaAtual: string;
+begin
+  FLock.Enter;
+  try
+    if FEtapa = '' then
+      Result := '(thread nunca executou)'
+    else
+      Result := FEtapa + ' desde ' + FormatDateTime('dd/mm hh:nn:ss', FEtapaDesde);
+  finally
+    FLock.Leave;
+  end;
 end;
 
 procedure TUploadWorker.ConfigurarOracle(const AConnectString, AOpcoes: string);
@@ -212,7 +245,10 @@ begin
   Result := False;
 
   if not FSQLite.EstaAberto then
+  begin
+    Etapa('abrindo SQLite', True);
     FSQLite.AbrirBanco;
+  end;
 
   FLock.Enter;
   try
@@ -225,7 +261,10 @@ begin
   end;
 
   if LConnectString = '' then
+  begin
+    Etapa('sem dados de conexao Oracle (ConfigurarOracle nao chamado)');
     Exit;
+  end;
 
   if LReconfigurar then
   begin
@@ -240,6 +279,7 @@ begin
   if FConn.Connected then
   begin
     try
+      Etapa('Ping Oracle');
       FConn.Ping;
       Exit(True);
     except
@@ -252,8 +292,10 @@ begin
   end;
 
   try
+    Etapa('conectando Oracle', True);
     FConn.Connect;
     Result := FConn.Connected;
+    Etapa('Oracle conectado=' + BoolToStr(Result, True), True);
   except
     on E: Exception do
       SyncLog('UPLOAD fila: Oracle indisponivel - [%s] %s', [E.ClassName, E.Message]);
@@ -263,6 +305,7 @@ end;
 procedure TUploadWorker.ExecutarJob(const AJob: TJobUpload);
 begin
   try
+    Etapa(Format('job %s cupom=%d', [NOME_TIPO[AJob.Tipo], AJob.CupomId]));
     if not GarantirConexao then
     begin
       if AJob.Tipo <> tuPendentes then
@@ -271,6 +314,7 @@ begin
       Exit;
     end;
 
+    Etapa(Format('executando %s cupom=%d', [NOME_TIPO[AJob.Tipo], AJob.CupomId]));
     case AJob.Tipo of
       tuVenda:
         begin
@@ -302,13 +346,22 @@ var
   LJob: TJobUpload;
 begin
   NameThreadForDebugging('ApoloWeb.UploadWorker');
-  while not Terminated do
-  begin
-    while (not Terminated) and ProximoJob(LJob) do
-      ExecutarJob(LJob);
+  Etapa('thread iniciado', True);
+  try
+    while not Terminated do
+    begin
+      while (not Terminated) and ProximoJob(LJob) do
+        ExecutarJob(LJob);
 
-    if not Terminated then
-      FEvento.WaitFor(INFINITE);
+      if not Terminated then
+      begin
+        Etapa('ocioso, aguardando pedido');
+        FEvento.WaitFor(INFINITE);
+      end;
+    end;
+  except
+    on E: Exception do
+      SyncLog('UPLOAD fila: thread morreu - [%s] %s', [E.ClassName, E.Message]);
   end;
 end;
 

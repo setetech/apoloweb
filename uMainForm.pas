@@ -184,7 +184,8 @@ begin
     if FUploadWorker.Parar(5000) then
       FUploadWorker.Free
     else
-      SyncLog('UPLOAD fila: encerrando com envio em andamento (fica pendente)');
+      SyncLog('UPLOAD fila: encerrando com envio em andamento (fica pendente) - etapa: %s',
+        [FUploadWorker.EtapaAtual]);
   end;
   FNFCeManager.Free;
   FBridge.Free;

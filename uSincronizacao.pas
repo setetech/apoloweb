@@ -2525,29 +2525,54 @@ begin
 end;
 
 procedure TSincronizador.EnviarDocEletronicosPendentes(AConn: TUniConnection);
+const
+  TAM_LOTE = 20;
+  MAX_POR_CICLO = 300;  // ~0,3 s por XML: no maximo uns 90 s no thread da fila
 var
   LQuery: TUniQuery;
+  LEnviados, LNoLote, LUltimoId: Integer;
 begin
-  // protocolo_nfe preenchido = nota autorizada, com XML em autorizadas\.
-  // Cupom em contingencia ja tem chavenfe mas ainda nao tem XML autorizado:
-  // so entra na fila depois que a retransmissao for aceita pelo SEFAZ.
-  LQuery := FSQLite.ExecutarSelect(
-    'SELECT id FROM cupons ' +
-    'WHERE doceletronico_enviado = 0 ' +
-    'AND chavenfe IS NOT NULL AND chavenfe <> '''' ' +
-    'AND protocolo_nfe IS NOT NULL AND protocolo_nfe <> '''' ' +
-    'AND codoper = ''V'' ' +
-    'ORDER BY id LIMIT 10'
-  );
-  try
-    while not LQuery.Eof do
-    begin
-      UploadDocEletronico(AConn, LQuery.FieldByName('id').AsInteger);
-      LQuery.Next;
+  // Drenar em lotes, como as vendas: com 10 por ciclo o acumulo de 23/09 a
+  // 29/09 (1079 XMLs) levaria umas 9 horas de caixa aberto para subir.
+  LEnviados := 0;
+  LUltimoId := 0;
+  repeat
+    LNoLote := 0;
+
+    // protocolo_nfe preenchido = nota autorizada, com XML em autorizadas\.
+    // Cupom em contingencia ja tem chavenfe mas ainda nao tem XML autorizado:
+    // so entra na fila depois que a retransmissao for aceita pelo SEFAZ.
+    // id > LUltimoId: quem falhou continua com enviado = 0 e nao pode prender
+    // o laco - fica para o proximo ciclo.
+    LQuery := FSQLite.ExecutarSelect(
+      'SELECT id FROM cupons ' +
+      'WHERE doceletronico_enviado = 0 ' +
+      'AND chavenfe IS NOT NULL AND chavenfe <> '''' ' +
+      'AND protocolo_nfe IS NOT NULL AND protocolo_nfe <> '''' ' +
+      'AND codoper = ''V'' ' +
+      'AND id > ' + IntToStr(LUltimoId) + ' ORDER BY id LIMIT ' + IntToStr(TAM_LOTE)
+    );
+    try
+      while not LQuery.Eof do
+      begin
+        LUltimoId := LQuery.FieldByName('id').AsInteger;
+        UploadDocEletronico(AConn, LUltimoId);
+        Inc(LNoLote);
+        Inc(LEnviados);
+        LQuery.Next;
+      end;
+    finally
+      LQuery.Free;
     end;
-  finally
-    LQuery.Free;
-  end;
+
+    if LNoLote < TAM_LOTE then Break;
+    if LEnviados >= MAX_POR_CICLO then
+    begin
+      SyncLog('UPLOAD doceletronico: %d no ciclo (limite). O resto vai no proximo retry.',
+        [LEnviados]);
+      Break;
+    end;
+  until False;
 end;
 
 procedure TSincronizador.EnviarNumerarioPendente(AConn: TUniConnection);
