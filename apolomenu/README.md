@@ -88,6 +88,9 @@ WebView2 (ja presente no Windows 10/11 e nos terminais com ApoloWeb).
 
 Do Linux para Windows: `rustup target add x86_64-pc-windows-gnu`, instale o
 `mingw-w64` e rode `cargo build --release --target x86_64-pc-windows-gnu`.
+Esse build (GNU) carrega o `WebView2Loader.dll` dinamicamente: copie o
+`x64\WebView2Loader.dll` do crate `webview2-com-sys` (no registry do cargo)
+para a pasta do exe. O build MSVC linka o loader estatico e dispensa a DLL.
 
 ## Testes
 
