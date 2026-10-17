@@ -303,6 +303,11 @@ async function testarConexao() {
     li.title = li.textContent;
     lista.appendChild(li);
   });
+  if (d.falhas && d.trace) {
+    const li = document.createElement('li');
+    li.textContent = 'Detalhes tecnicos gravados em ' + d.trace;
+    lista.appendChild(li);
+  }
 }
 
 async function salvarConfig(ev) {

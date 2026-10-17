@@ -125,9 +125,20 @@ impl App {
         let sql = self.cfg().sql;
         let conn = Banco::conectar(&oracle).await?;
 
+        // Copia dos pacotes so' deste teste (ja autenticado, binds ficticios):
+        // e' o que permite diagnosticar o driver num servidor que nao temos aqui
+        let trace = log::pasta().map(|p| p.join("oracle-trace.log"));
+        if let Some(arq) = &trace {
+            let _ = std::fs::remove_file(arq);
+            if let Err(e) = conn.set_trace(Some(arq)).await {
+                log::registrar(format!("Trace Oracle indisponivel ({}): {e}", arq.display()));
+            }
+        }
+
         let primeiro = |linhas: Result<Vec<oracle_rs::Row>, String>| {
             linhas.ok().and_then(|l| l.first().map(|r| db::texto(r, 0)))
         };
+        conn.trace_note("SQL versao").await;
         let versao = primeiro(
             db::consultar_em(
                 &conn,
@@ -138,6 +149,7 @@ impl App {
             .await,
         )
         .unwrap_or_default();
+        conn.trace_note("SQL charset").await;
         let charset = primeiro(
             db::consultar_em(
                 &conn,
@@ -149,6 +161,7 @@ impl App {
         .unwrap_or_default();
 
         let consultas = [
+            ("dual", "SELECT 1 FROM dual", vec![]),
             ("login", &sql.login, vec![("login", Ora::from("~teste~")), ("senha", Ora::from("~"))]),
             ("rotinas", &sql.rotinas, vec![("matricula", Ora::Integer(-1))]),
             (
@@ -160,6 +173,7 @@ impl App {
         let mut verificacoes = Vec::new();
         let mut falhas = 0;
         for (nome, consulta, binds) in consultas {
+            conn.trace_note(&format!("SQL {nome}: {consulta}")).await;
             let erro = db::consultar_em(&conn, consulta, &binds).await.err();
             if let Some(e) = &erro {
                 falhas += 1;
@@ -167,6 +181,7 @@ impl App {
             }
             verificacoes.push(json!({ "nome": nome, "ok": erro.is_none(), "mensagem": erro }));
         }
+        let _ = conn.set_trace(None).await;
         let _ = conn.close().await;
 
         let mensagem = if falhas == 0 {
@@ -181,6 +196,7 @@ impl App {
                 "charset": charset,
                 "falhas": falhas,
                 "verificacoes": verificacoes,
+                "trace": trace.map(|t| t.display().to_string()),
             }),
         )
     }
@@ -426,6 +442,7 @@ mod testes {
         )
         .unwrap();
         let app = App::new(Config::carregar_de(&ini));
+        log::iniciar(Some(&dir));
         let chamar = |acao: &'static str, dados: Value| {
             let app = &app;
             async move { resposta(&app.processar(acao, dados).await) }
@@ -435,6 +452,11 @@ mod testes {
             "username": var("APOLOMENU_TESTE_USUARIO")})).await;
         assert_eq!(r["sucesso"], true, "{r}");
         assert_eq!(r["dados"]["falhas"], 0, "{r}");
+        // Trace do teste: pacotes das consultas, nada da autenticacao
+        let trace = std::fs::read_to_string(dir.join("logs").join("oracle-trace.log")).unwrap();
+        assert!(trace.contains("# SQL dual: SELECT 1 FROM dual"), "{trace}");
+        assert!(trace.starts_with("# protocolo="), "{trace}");
+        assert!(!trace.contains("AUTH_"), "trace nao pode ter a autenticacao");
         assert!(r["dados"]["versao"].as_str().unwrap().starts_with("23"), "{r}");
 
         // SQL do ini com coluna errada: o ORA- chega inteiro e a sessao segue
@@ -446,7 +468,7 @@ mod testes {
         let r = resposta(&app_errado.processar("testarConexao", json!({"server": var("APOLOMENU_TESTE_ORACLE"),
             "username": var("APOLOMENU_TESTE_USUARIO")})).await);
         assert_eq!(r["dados"]["falhas"], 1, "{r}");
-        assert!(r["dados"]["verificacoes"][1]["mensagem"].as_str().unwrap().starts_with("ORA-00904"), "{r}");
+        assert!(r["dados"]["verificacoes"][2]["mensagem"].as_str().unwrap().starts_with("ORA-00904"), "{r}");
         let r = resposta(&app_errado.processar("login", json!({"login": "15", "senha": "segredo"})).await);
         assert_eq!(r["sucesso"], true, "{r}");
         let r = resposta(&app_errado.processar("listarRotinas", json!({})).await);

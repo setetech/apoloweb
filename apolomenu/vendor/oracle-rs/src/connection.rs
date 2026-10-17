@@ -282,6 +282,8 @@ struct ConnectionInner {
     sequence_number: u8,
     /// Statement cache for prepared statement reuse
     statement_cache: Option<StatementCache>,
+    /// apolomenu: copia hex dos pacotes (diagnostico; ligada so' depois do login)
+    trace: Option<std::fs::File>,
 }
 
 impl ConnectionInner {
@@ -294,6 +296,7 @@ impl ConnectionInner {
             sdu_size: 8192,
             large_sdu: false,
             sequence_number: 0,
+            trace: None,
             statement_cache: if cache_size > 0 {
                 Some(StatementCache::new(cache_size))
             } else {
@@ -311,7 +314,19 @@ impl ConnectionInner {
         self.sequence_number
     }
 
+    fn trace_packet(&mut self, direction: &str, data: &[u8]) {
+        use std::io::Write;
+        if let Some(f) = self.trace.as_mut() {
+            let _ = writeln!(f, "{direction} {} bytes", data.len());
+            for chunk in data.chunks(32) {
+                let hex: Vec<String> = chunk.iter().map(|b| format!("{b:02x}")).collect();
+                let _ = writeln!(f, "  {}", hex.join(" "));
+            }
+        }
+    }
+
     async fn send(&mut self, data: &[u8]) -> Result<()> {
+        self.trace_packet(">", data);
         if let Some(stream) = &mut self.stream {
             stream.write_all(data).await?;
             stream.flush().await?;
@@ -412,6 +427,7 @@ impl ConnectionInner {
             let mut full_packet = header_buf.clone();
             full_packet.extend(payload_buf);
 
+            self.trace_packet("<", &full_packet);
             Ok(bytes::Bytes::from(full_packet))
         } else {
             Err(Error::ConnectionClosed)
@@ -818,6 +834,39 @@ impl Connection {
         conn.perform_handshake().await?;
 
         Ok(conn)
+    }
+
+    /// apolomenu: grava em `path` a copia hex de todo pacote enviado e recebido
+    /// a partir de agora (`None` desliga). Chamar so' depois de conectar: a
+    /// troca de autenticacao nunca vai para o arquivo.
+    pub async fn set_trace(&self, path: Option<&std::path::Path>) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut inner = self.inner.lock().await;
+        inner.trace = match path {
+            None => None,
+            Some(p) => {
+                let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p)?;
+                let caps = &inner.capabilities;
+                writeln!(
+                    f,
+                    "# protocolo={} field_version={} sdu={} large_sdu={} end_of_response={} \
+                     charset={} ncharset={} max_string={}",
+                    inner.server_info.protocol_version, caps.ttc_field_version, inner.sdu_size, inner.large_sdu,
+                    caps.supports_end_of_response, caps.charset_id, caps.ncharset_id,
+                    caps.max_string_size
+                )?;
+                Some(f)
+            }
+        };
+        Ok(())
+    }
+
+    /// apolomenu: anotacao livre no arquivo de trace (ex.: o SQL que vai rodar)
+    pub async fn trace_note(&self, note: &str) {
+        use std::io::Write;
+        if let Some(f) = self.inner.lock().await.trace.as_mut() {
+            let _ = writeln!(f, "# {note}");
+        }
     }
 
     /// Get the connection ID

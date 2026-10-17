@@ -12,6 +12,11 @@ em `src/connection.rs` e marcadas com "apolomenu":
    O original nao pulava os campos que o servidor 20c+ manda antes do texto
    e a mensagem saia vazia.
 
+3. `Connection::set_trace` / `trace_note`: copia hex dos pacotes num arquivo,
+   ligada pelo "Testar conexao" do menu so' depois de autenticar (a troca de
+   senha nunca e' gravada). Serve para diagnosticar o driver num servidor
+   que nao temos aqui (`c:\apolo\logs\oracle-trace.log`).
+
 Para atualizar o driver: trocar esta pasta pela versao nova do crate e
 conferir se as duas correcoes ainda sao necessarias (teste
 `fluxo_completo_no_oracle` + consulta com erro proposital).

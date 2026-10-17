@@ -12,6 +12,11 @@ pub fn iniciar(pasta_ini: Option<&std::path::Path>) {
     let _ = ARQUIVO.set(pasta.join("apolomenu.log"));
 }
 
+/// Pasta dos logs (para arquivos de diagnostico ao lado do apolomenu.log)
+pub fn pasta() -> Option<PathBuf> {
+    ARQUIVO.get().and_then(|a| a.parent().map(|p| p.to_path_buf()))
+}
+
 pub fn registrar(msg: impl AsRef<str>) {
     let agora = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let linha = format!("{agora} {}\r\n", msg.as_ref());

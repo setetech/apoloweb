@@ -126,6 +126,10 @@ APOLOMENU_TESTE_SENHA=apolo123 APOLOMENU_TESTE_SENHA_SYSTEM=Sys123 \
 - "Testar conexao" mostra versao e charset do banco e roda as 3 consultas do
   `[sql]` com valores ficticios: tabela/coluna/funcao com outro nome aparece
   ali com o ORA- exato, antes de alguem tentar entrar.
+- O mesmo teste grava `c:\apolo\logs\oracle-trace.log` com a copia dos
+  pacotes das consultas de diagnostico (depois da autenticacao, binds
+  ficticios). Se o driver falhar num servidor novo, e' esse arquivo que
+  mostra o que o Oracle respondeu.
 
 ## Proximos passos (fora deste primeiro corte)
 
