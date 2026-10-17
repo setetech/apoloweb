@@ -24,7 +24,7 @@ impl Banco {
         let limite = Duration::from_secs(cfg.timeout_seg.max(1));
         match tokio::time::timeout(limite, Connection::connect_with_config(driver)).await {
             Ok(Ok(conn)) => Ok(conn),
-            Ok(Err(e)) => Err(format!("Falha ao conectar no Oracle: {e}")),
+            Ok(Err(e)) => Err(format!("Falha ao conectar no Oracle: {}", texto_erro(&e))),
             Err(_) => Err(format!(
                 "Oracle nao respondeu em {}s ({})",
                 limite.as_secs(),
@@ -55,7 +55,7 @@ impl Banco {
                     // Erro de SQL com a sessao viva (ORA-00942 etc.) volta direto;
                     // sessao morta e' descartada e a consulta repetida uma vez.
                     if conn.ping().await.is_ok() || tentativa == 1 {
-                        return Err(e.to_string());
+                        return Err(texto_erro(&e));
                     }
                     if let Some(morta) = guarda.take() {
                         morta.mark_closed();
@@ -70,6 +70,24 @@ impl Banco {
         if let Some(conn) = self.conexao.lock().await.take() {
             let _ = conn.close().await;
         }
+    }
+}
+
+/// Consulta avulsa numa conexao ja aberta (diagnostico do "Testar conexao").
+pub async fn consultar_em(
+    conn: &Connection,
+    sql_nomeado: &str,
+    binds: &[(&str, Value)],
+) -> Result<Vec<Row>, String> {
+    let (sql, params) = sql::preparar(sql_nomeado, binds)?;
+    buscar_tudo(conn, &sql, &params).await.map_err(|e| texto_erro(&e))
+}
+
+/// O texto do ORA- ja traz o codigo; o Display do driver repetiria.
+fn texto_erro(e: &oracle_rs::Error) -> String {
+    match e {
+        oracle_rs::Error::OracleError { message, .. } if message.starts_with("ORA-") => message.clone(),
+        outro => outro.to_string(),
     }
 }
 

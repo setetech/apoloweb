@@ -117,14 +117,71 @@ impl App {
         }
     }
 
+    /// Conecta com os dados da tela e roda as 3 consultas do ini com valores
+    /// que nao existem: sem linha nenhuma, mas com tabela/coluna/funcao
+    /// erradas o ORA- aparece aqui, antes de alguem tentar entrar.
     async fn testar_conexao(&self, dados: &Value) -> Resultado {
         let oracle = self.oracle_da_tela(dados);
+        let sql = self.cfg().sql;
         let conn = Banco::conectar(&oracle).await?;
-        let info = conn.server_info().await;
+
+        let primeiro = |linhas: Result<Vec<oracle_rs::Row>, String>| {
+            linhas.ok().and_then(|l| l.first().map(|r| db::texto(r, 0)))
+        };
+        let versao = primeiro(
+            db::consultar_em(
+                &conn,
+                "SELECT version FROM product_component_version \
+                  WHERE UPPER(product) LIKE 'ORACLE%' AND ROWNUM = 1",
+                &[],
+            )
+            .await,
+        )
+        .unwrap_or_default();
+        let charset = primeiro(
+            db::consultar_em(
+                &conn,
+                "SELECT value FROM nls_database_parameters WHERE parameter = 'NLS_CHARACTERSET'",
+                &[],
+            )
+            .await,
+        )
+        .unwrap_or_default();
+
+        let consultas = [
+            ("login", &sql.login, vec![("login", Ora::from("~teste~")), ("senha", Ora::from("~"))]),
+            ("rotinas", &sql.rotinas, vec![("matricula", Ora::Integer(-1))]),
+            (
+                "acesso_rotina",
+                &sql.acesso,
+                vec![("matricula", Ora::Integer(-1)), ("codrotina", Ora::Integer(-1))],
+            ),
+        ];
+        let mut verificacoes = Vec::new();
+        let mut falhas = 0;
+        for (nome, consulta, binds) in consultas {
+            let erro = db::consultar_em(&conn, consulta, &binds).await.err();
+            if let Some(e) = &erro {
+                falhas += 1;
+                log::registrar(format!("[testarConexao] SQL {nome}: {e}"));
+            }
+            verificacoes.push(json!({ "nome": nome, "ok": erro.is_none(), "mensagem": erro }));
+        }
         let _ = conn.close().await;
+
+        let mensagem = if falhas == 0 {
+            "Conexao OK".to_string()
+        } else {
+            format!("Conectou, mas {falhas} consulta(s) do [sql] falharam")
+        };
         ok(
-            "Conexao OK",
-            json!({ "versao": info.version, "banner": info.banner }),
+            &mensagem,
+            json!({
+                "versao": versao,
+                "charset": charset,
+                "falhas": falhas,
+                "verificacoes": verificacoes,
+            }),
         )
     }
 
@@ -377,6 +434,25 @@ mod testes {
         let r = chamar("testarConexao", json!({"server": var("APOLOMENU_TESTE_ORACLE"),
             "username": var("APOLOMENU_TESTE_USUARIO")})).await;
         assert_eq!(r["sucesso"], true, "{r}");
+        assert_eq!(r["dados"]["falhas"], 0, "{r}");
+        assert!(r["dados"]["versao"].as_str().unwrap().starts_with("23"), "{r}");
+
+        // SQL do ini com coluna errada: o ORA- chega inteiro e a sessao segue
+        let ini_errado = dir.join("errado.ini");
+        let conteudo = std::fs::read_to_string(&ini).unwrap()
+            + "[sql]\nrotinas=SELECT codrotina, coluna_errada FROM msrotina WHERE :matricula = 1\n";
+        std::fs::write(&ini_errado, conteudo).unwrap();
+        let app_errado = App::new(Config::carregar_de(&ini_errado));
+        let r = resposta(&app_errado.processar("testarConexao", json!({"server": var("APOLOMENU_TESTE_ORACLE"),
+            "username": var("APOLOMENU_TESTE_USUARIO")})).await);
+        assert_eq!(r["dados"]["falhas"], 1, "{r}");
+        assert!(r["dados"]["verificacoes"][1]["mensagem"].as_str().unwrap().starts_with("ORA-00904"), "{r}");
+        let r = resposta(&app_errado.processar("login", json!({"login": "15", "senha": "segredo"})).await);
+        assert_eq!(r["sucesso"], true, "{r}");
+        let r = resposta(&app_errado.processar("listarRotinas", json!({})).await);
+        assert!(r["mensagem"].as_str().unwrap().starts_with("ORA-00904"), "{r}");
+        let r = resposta(&app_errado.processar("executarRotina", json!({"codrotina": 8002})).await);
+        assert_eq!(r["mensagem"], "Rotina 8002 nao liberada para este usuario.", "sessao viva apos o erro: {r}");
 
         let r = chamar("login", json!({"login": "maria", "senha": "errada"})).await;
         assert_eq!(r["mensagem"], "Usuario ou senha invalida.", "{r}");

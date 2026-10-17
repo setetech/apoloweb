@@ -255,6 +255,7 @@ async function abrirConfig() {
   $('cfg-admin').value = '';
   $('cfg-status').textContent = '';
   $('cfg-status').className = 'info';
+  $('cfg-verificacoes').replaceChildren();
   $('cfg-arquivo').textContent = d.arquivoIni ? 'Grava em: ' + d.arquivoIni : '';
   $('modal-config').hidden = false;
   $('cfg-server').focus();
@@ -286,12 +287,22 @@ async function testarConexao() {
   $('btn-testar').disabled = true;
   const r = await chamar(Bridge.testarConexao(dadosConfig()));
   $('btn-testar').disabled = false;
-  if (r.sucesso) {
-    const versao = r.dados.versao ? ' - Oracle ' + r.dados.versao : '';
-    statusConfig('Conexao OK' + versao, 'ok');
-  } else {
+  const lista = $('cfg-verificacoes');
+  lista.replaceChildren();
+  if (!r.sucesso) {
     statusConfig(r.mensagem, 'falha');
+    return;
   }
+  const d = r.dados;
+  const extras = [d.versao && 'Oracle ' + d.versao, d.charset].filter(Boolean).join(' - ');
+  statusConfig(r.mensagem + (extras ? ' (' + extras + ')' : ''), d.falhas ? 'falha' : 'ok');
+  (d.verificacoes || []).forEach((v) => {
+    const li = document.createElement('li');
+    li.className = v.ok ? 'ok' : 'falha';
+    li.textContent = (v.ok ? '\u2713 ' : '\u2717 ') + 'SQL ' + v.nome + (v.ok ? '' : ': ' + v.mensagem);
+    li.title = li.textContent;
+    lista.appendChild(li);
+  });
 }
 
 async function salvarConfig(ev) {

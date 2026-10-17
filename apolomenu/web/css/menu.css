@@ -82,6 +82,9 @@ input:focus { border-color: var(--border-focus); }
 .info { min-height: 20px; margin-top: 8px; color: var(--text-secondary); }
 .info.ok { color: var(--accent-success); }
 .info.falha { color: var(--accent-danger); }
+.verificacoes { list-style: none; font-size: 12px; display: flex; flex-direction: column; gap: 3px; user-select: text; }
+.verificacoes .ok { color: var(--accent-success); }
+.verificacoes .falha { color: var(--accent-danger); word-break: break-word; }
 .arquivo { color: var(--text-muted); font-size: 12px; word-break: break-all; }
 
 /* ===== Login ===== */
@@ -157,7 +160,8 @@ input:focus { border-color: var(--border-focus); }
   display: flex; align-items: center; justify-content: center; z-index: 10;
 }
 .modal[hidden] { display: none; }
-.modal .cartao { width: 460px; }
+.modal .cartao { width: 460px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.modal .cartao > * { flex-shrink: 0; }
 .linha { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .linha > div { display: flex; flex-direction: column; gap: 6px; }
 .acoes { display: flex; gap: 8px; margin-top: 14px; }

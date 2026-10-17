@@ -119,9 +119,13 @@ APOLOMENU_TESTE_SENHA=apolo123 APOLOMENU_TESTE_SENHA_SYSTEM=Sys123 \
 - Sem *Native Network Encryption*: se o `sqlnet.ora` do servidor exigir
   `SQLNET.ENCRYPTION_SERVER=REQUIRED`, use TLS (TCPS) ou relaxe para
   `ACCEPTED`.
-- Erro de PL/SQL dentro do SELECT (ex.: funcao `ofuscar` invalida) chega
-  como "Oracle closed the connection without providing error details" em
-  vez do ORA- original; teste o SQL no SQL*Plus quando aparecer.
+- O driver e' usado a partir de uma copia corrigida em `vendor/oracle-rs`
+  (ver `vendor/oracle-rs/APOLOMENU.md`): no crate publicado todo erro ORA-
+  derrubava a sessao e chegava como "Oracle closed the connection..." ou
+  "buffer underflow". Com a correcao o ORA- chega inteiro e a sessao segue.
+- "Testar conexao" mostra versao e charset do banco e roda as 3 consultas do
+  `[sql]` com valores ficticios: tabela/coluna/funcao com outro nome aparece
+  ali com o ORA- exato, antes de alguem tentar entrar.
 
 ## Proximos passos (fora deste primeiro corte)
 

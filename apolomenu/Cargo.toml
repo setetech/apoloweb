@@ -24,3 +24,7 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# oracle-rs 0.1.7 com correcoes para Oracle 12c-21c (ver vendor/oracle-rs/APOLOMENU.md)
+[patch.crates-io]
+oracle-rs = { path = "vendor/oracle-rs" }
