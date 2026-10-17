@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apolo - Menu</title>
+  <link rel="stylesheet" href="css/menu.css">
+</head>
+<body>
+
+  <!-- ===== LOGIN ===== -->
+  <section id="tela-login" class="tela ativa">
+    <form id="form-login" class="cartao login" autocomplete="off">
+      <h1>Apolo</h1>
+      <p class="sub">Menu de rotinas</p>
+
+      <label for="login-usuario">Usuario ou matricula</label>
+      <input id="login-usuario" type="text" autofocus spellcheck="false">
+
+      <label for="login-senha">Senha</label>
+      <input id="login-senha" type="password">
+
+      <button type="submit" class="btn primario" id="btn-entrar">Entrar</button>
+      <p id="login-erro" class="erro" role="alert"></p>
+
+      <div class="rodape">
+        <span id="login-servidor"></span>
+        <button type="button" class="btn link" id="btn-config">Configurar conexao</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ===== MENU ===== -->
+  <section id="tela-menu" class="tela">
+    <header class="topo">
+      <div class="marca">Apolo <span>Menu</span></div>
+      <div class="usuario">
+        <span id="menu-usuario"></span>
+        <button class="btn" id="btn-trocar" title="Trocar usuario">Trocar usuario</button>
+        <button class="btn perigo" id="btn-sair" title="Fechar o menu">Sair</button>
+      </div>
+    </header>
+
+    <div class="busca">
+      <input id="busca" type="text" placeholder="Codigo da rotina + Enter, ou parte do nome" spellcheck="false">
+      <span id="busca-total"></span>
+    </div>
+
+    <div class="conteudo">
+      <aside id="recentes-box" class="recentes" hidden>
+        <h2>Recentes</h2>
+        <ul id="recentes"></ul>
+      </aside>
+      <main id="lista" class="lista" tabindex="-1"></main>
+    </div>
+
+    <footer class="status">
+      <span id="status-msg">Pronto</span>
+      <span id="status-servidor"></span>
+    </footer>
+  </section>
+
+  <!-- ===== CONFIGURACAO ===== -->
+  <div id="modal-config" class="modal" hidden>
+    <form id="form-config" class="cartao" autocomplete="off">
+      <h2>Conexao Oracle</h2>
+      <p class="sub">Direto pela rede (TNS), sem Oracle Client.</p>
+
+      <label for="cfg-server">Servidor <small>host:porta/servico ou host:porta:SID</small></label>
+      <input id="cfg-server" type="text" spellcheck="false" placeholder="192.168.0.10:1521/ORCL">
+
+      <div class="linha">
+        <div>
+          <label for="cfg-port">Porta <small>(se o servidor nao trouxer)</small></label>
+          <input id="cfg-port" type="number" min="1" max="65535" placeholder="1521">
+        </div>
+        <div>
+          <label for="cfg-timeout">Timeout (s)</label>
+          <input id="cfg-timeout" type="number" min="1" max="120" placeholder="15">
+        </div>
+      </div>
+
+      <label for="cfg-username">Usuario do banco</label>
+      <input id="cfg-username" type="text" spellcheck="false">
+
+      <label for="cfg-password">Senha do banco</label>
+      <input id="cfg-password" type="password" placeholder="">
+
+      <label for="cfg-admin">Senha de administrador</label>
+      <input id="cfg-admin" type="password">
+
+      <p id="cfg-status" class="info"></p>
+      <p id="cfg-arquivo" class="arquivo"></p>
+
+      <div class="acoes">
+        <button type="button" class="btn" id="btn-testar">Testar conexao</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn" id="btn-cancelar">Cancelar</button>
+        <button type="submit" class="btn primario">Salvar</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="js/bridge.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

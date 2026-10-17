@@ -1,0 +1,31 @@
+; Apolo Menu - copie para c:\apolo\apolomenu.ini (ou aponte APOLOMENU_INI)
+; Sem [oracle] aqui, o menu usa o [oracle] do c:\apolo\apoloweb.ini do PDV.
+; Uma linha por chave; nada de escape: barra invertida e apostrofo valem como estao.
+
+[oracle]
+; host:porta/servico  ou  host:porta:SID  (mesmo formato do Direct do UniDAC)
+server=192.168.0.10:1521/ORCL
+; so usada quando o server nao traz porta
+port=
+username=APOLO
+password=
+; segundos para desistir de conectar
+timeout=15
+
+[rotinas]
+; pasta dos executaveis das rotinas
+pasta=c:\apolo\rotinas
+; {codrotina} vira o numero da rotina
+executavel=ROT{codrotina}.exe
+; argumentos (separados por espaco): {codrotina} {matricula} {usuario}
+; a rotina tambem recebe APOLO_MATRICULA, APOLO_USUARIO, APOLO_NOME,
+; APOLO_ROTINA e APOLO_INI no ambiente
+parametros={matricula}
+
+[sql]
+; Binds nomeados: :login :senha (login), :matricula (rotinas), :matricula e
+; :codrotina (acesso_rotina). Pode repetir o mesmo bind.
+; Descomente para trocar o SQL padrao (ver README).
+;login=SELECT f.matricula, f.nome, f.usuariodb FROM msfunc f WHERE f.dtexclusao IS NULL AND (TO_CHAR(f.matricula) = :login OR UPPER(f.usuariodb) = UPPER(:login)) AND UPPER(ofuscar(f.senhadb, f.usuariodb)) = UPPER(:senha)
+;rotinas=SELECT r.codrotina, r.descricao, r.modulo FROM msrotina r WHERE EXISTS (SELECT 1 FROM msacesso a WHERE a.codrotina = r.codrotina AND a.matricula = :matricula) ORDER BY r.codrotina
+;acesso_rotina=SELECT COUNT(*) FROM msacesso WHERE matricula = :matricula AND codrotina = :codrotina

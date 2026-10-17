@@ -1,0 +1,179 @@
+/* ========================================================
+   Apolo Menu - mesmas cores do tema escuro do ApoloWeb
+   ======================================================== */
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-tertiary: #252836;
+  --bg-hover: #2d3142;
+  --bg-active: #353a50;
+  --accent-primary: #6c5ce7;
+  --accent-primary-hover: #7c6ff7;
+  --accent-success: #00b894;
+  --accent-danger: #e17055;
+  --accent-info: #74b9ff;
+  --text-primary: #f8f9fa;
+  --text-secondary: #a0a4b8;
+  --text-muted: #6c7293;
+  --border-color: #2d3142;
+  --border-focus: #6c5ce7;
+  --raio: 10px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+input, button { font: inherit; color: inherit; }
+
+.tela { display: none; height: 100%; }
+.tela.ativa { display: flex; }
+
+.cartao {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--raio);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+}
+
+h1 { font-size: 30px; letter-spacing: 1px; }
+h2 { font-size: 18px; }
+.sub { color: var(--text-secondary); margin-bottom: 14px; }
+label { color: var(--text-secondary); margin-top: 8px; font-size: 13px; }
+label small { color: var(--text-muted); }
+
+input {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 9px 11px;
+  outline: none;
+  user-select: text;
+}
+input:focus { border-color: var(--border-focus); }
+
+.btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn:disabled { opacity: .5; cursor: wait; }
+.btn.primario { background: var(--accent-primary); border-color: var(--accent-primary); }
+.btn.primario:hover { background: var(--accent-primary-hover); }
+.btn.perigo:hover { background: var(--accent-danger); }
+.btn.link { background: none; border: none; color: var(--accent-info); padding: 0; }
+
+.erro { color: var(--accent-danger); min-height: 20px; margin-top: 6px; }
+.info { min-height: 20px; margin-top: 8px; color: var(--text-secondary); }
+.info.ok { color: var(--accent-success); }
+.info.falha { color: var(--accent-danger); }
+.arquivo { color: var(--text-muted); font-size: 12px; word-break: break-all; }
+
+/* ===== Login ===== */
+#tela-login { align-items: center; justify-content: center; }
+.login #btn-entrar { margin-top: 18px; padding: 10px; }
+.rodape {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 10px; color: var(--text-muted); font-size: 12px; gap: 8px;
+}
+
+/* ===== Menu ===== */
+#tela-menu { flex-direction: column; }
+
+.topo {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+.marca { font-size: 18px; font-weight: 600; }
+.marca span { color: var(--accent-primary); }
+.usuario { display: flex; align-items: center; gap: 10px; }
+#menu-usuario { color: var(--text-secondary); }
+
+.busca { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.busca input { flex: 1; font-size: 16px; padding: 11px 14px; }
+#busca-total { color: var(--text-muted); white-space: nowrap; }
+
+.conteudo { flex: 1; display: flex; min-height: 0; gap: 12px; padding: 0 16px 12px; }
+
+.recentes {
+  width: 230px; flex-shrink: 0; overflow-y: auto;
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: var(--raio); padding: 12px;
+}
+.recentes h2 { font-size: 13px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; }
+.recentes ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.recentes li {
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recentes li:hover { background: var(--bg-hover); }
+.recentes b { color: var(--accent-primary); margin-right: 6px; }
+
+.lista {
+  flex: 1; overflow-y: auto; outline: none;
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: var(--raio);
+}
+.grupo h3 {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+  padding: 6px 14px;
+}
+.rotina {
+  display: grid; grid-template-columns: 70px 1fr; gap: 10px;
+  padding: 8px 14px; cursor: pointer; border-bottom: 1px solid var(--bg-tertiary);
+}
+.rotina:hover { background: var(--bg-hover); }
+.rotina.selecionada { background: var(--bg-active); box-shadow: inset 3px 0 var(--accent-primary); }
+.rotina .cod { color: var(--accent-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.vazio { padding: 40px; text-align: center; color: var(--text-muted); }
+
+.status {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 6px 16px; font-size: 12px; color: var(--text-muted);
+  background: var(--bg-secondary); border-top: 1px solid var(--border-color);
+}
+
+/* ===== Modal ===== */
+.modal {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .6);
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+.modal[hidden] { display: none; }
+.modal .cartao { width: 460px; }
+.linha { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.linha > div { display: flex; flex-direction: column; gap: 6px; }
+.acoes { display: flex; gap: 8px; margin-top: 14px; }
+.espaco { flex: 1; }
+
+/* ===== Toasts ===== */
+#toasts { position: fixed; right: 16px; bottom: 40px; display: flex; flex-direction: column; gap: 8px; z-index: 20; }
+.toast {
+  background: var(--bg-tertiary); border-left: 4px solid var(--accent-info);
+  padding: 10px 14px; border-radius: 6px; max-width: 420px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .4);
+}
+.toast.erro { border-left-color: var(--accent-danger); color: var(--text-primary); margin: 0; min-height: 0; }
+.toast.ok { border-left-color: var(--accent-success); }
+
+@media (max-width: 760px) {
+  .recentes { display: none; }
+  .usuario #menu-usuario { display: none; }
+}
