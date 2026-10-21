@@ -73,7 +73,9 @@ CREATE TABLE msapolo_venda_item (
   icms_cst      VARCHAR2(5),
   csosn         VARCHAR2(5),
   aliqicms      NUMBER(9,4),
-  pis_cst       VARCHAR2(5),
+  vbc_nfe       NUMBER(15,2),  -- base do ICMS do item no XML da NFC-e (com rateio do subtotal)
+  vicms_nfe     NUMBER(15,2),  -- valor do ICMS do item no XML da NFC-e
+  pis_cst      VARCHAR2(5),
   cofins_cst    VARCHAR2(5),
   aliqpis       NUMBER(9,4),
   aliqcofins    NUMBER(9,4),
@@ -91,6 +93,8 @@ CREATE TABLE msapolo_venda_item (
 -- Instalacoes onde a tabela ja existe sem a coluna qtunit:
 -- ALTER TABLE msapolo_venda_item ADD (qtunit NUMBER(15,3) DEFAULT 1);
 -- (o PDV verifica a existencia da coluna e envia sem ela enquanto nao rodar)
+-- Idem para vbc_nfe / vicms_nfe:
+-- ALTER TABLE msapolo_venda_item ADD (vbc_nfe NUMBER(15,2), vicms_nfe NUMBER(15,2));
 
 -- --------------------------------------------------------------- pagamentos
 CREATE TABLE msapolo_venda_pagto (

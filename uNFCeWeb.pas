@@ -1517,6 +1517,7 @@ var
   LVlProd, LVlDesc, LVlOutro, LAliqICMS: Double;
   LDescSub, LEncargo, LBaseRateio, LLiquido, LCumLiquido, LParcela: Double;
   LDescRateado, LOutroRateado: Double;
+  LVBCItem, LVICMSItem: Double;
   LCst: string;
   ok: Boolean;
 
@@ -1637,6 +1638,8 @@ begin
 
         // ICMS
         LAliqICMS := LQuery.FieldByName('aliqicms').AsFloat;
+        LVBCItem := 0;
+        LVICMSItem := 0;
         if FRegimeTributario = 1 then
         begin
           // Simples Nacional
@@ -1691,6 +1694,8 @@ begin
             Imposto.ICMS.vICMS := RoundTo((LVlProd - LVlDesc) * LAliqICMS / 100, -2);
             ATotVBC := ATotVBC + Imposto.ICMS.vBC;
             ATotVICMS := ATotVICMS + Imposto.ICMS.vICMS;
+            LVBCItem := Imposto.ICMS.vBC;
+            LVICMSItem := Imposto.ICMS.vICMS;
           end;
         end;
 
@@ -1724,6 +1729,13 @@ begin
         LQuery.FieldByName('codprod').AsLargeInt,
         Trim(LQuery.FieldByName('ncm').AsString),
         LVlProd - LVlDesc);
+
+      // Guarda no item o vBC/vICMS que foi para o XML (com o rateio do
+      // subtotal), para o upload levar a msapolo_venda_item.vbc_nfe/vicms_nfe
+      // sem refazer o calculo. Simples Nacional e aliquota zero gravam 0.
+      FSQLite.ExecutarSQL(
+        'UPDATE cupom_itens SET vbc_nfe = :vbc, vicms_nfe = :vicms WHERE id = :id',
+        [LVBCItem, LVICMSItem, LQuery.FieldByName('id').AsInteger]);
 
       // Totais
       ATotVProd := ATotVProd + LVlProd;

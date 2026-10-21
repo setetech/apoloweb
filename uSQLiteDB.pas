@@ -53,7 +53,7 @@ type
   end;
 
 const
-  SCHEMA_VERSION = 24;
+  SCHEMA_VERSION = 25;
 
 implementation
 
@@ -339,6 +339,16 @@ begin
     ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN cbs_predaliq REAL');
     ExecutarSQL('ALTER TABLE trib_ibs_cbs ADD COLUMN cbs_paliqefet REAL');
     AtualizarVersaoSchema(24);
+  end;
+
+  // v25: base de calculo e valor do ICMS do item exatamente como foram para o
+  // XML da NFC-e (ja com o rateio do desconto/acrescimo do subtotal). Gravados
+  // em PreencherItens e levados para msapolo_venda_item.vbc_nfe/vicms_nfe.
+  if ObterVersaoSchema = 24 then
+  begin
+    ExecutarSQL('ALTER TABLE cupom_itens ADD COLUMN vbc_nfe REAL DEFAULT 0');
+    ExecutarSQL('ALTER TABLE cupom_itens ADD COLUMN vicms_nfe REAL DEFAULT 0');
+    AtualizarVersaoSchema(25);
   end;
 
   if ObterVersaoSchema < SCHEMA_VERSION then
@@ -1007,6 +1017,8 @@ begin
     '  prod_origem TEXT,' +
     '  aliqicms REAL DEFAULT 0,' +
     '  icms_percbasered REAL DEFAULT 0,' +
+    '  vbc_nfe REAL DEFAULT 0,' +
+    '  vicms_nfe REAL DEFAULT 0,' +
     '  pis_cst TEXT,' +
     '  cofins_cst TEXT,' +
     '  aliqpis REAL DEFAULT 0,' +

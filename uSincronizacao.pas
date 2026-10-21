@@ -1578,7 +1578,7 @@ var
   LNumTrans: Int64;
   LSw: TStopwatch;
   LQtdItens, LQtdPagtos: Integer;
-  LTemQtUnit: Boolean;
+  LTemQtUnit, LTemVBCNfe, LTemVICMSNfe: Boolean;
 begin
   if not AConn.Connected then Exit;
   LSw := TStopwatch.StartNew;
@@ -1678,6 +1678,10 @@ begin
             // QTUNIT pode ainda nao existir na msapolo_venda_item da
             // retaguarda; nesse caso o upload segue sem a coluna
             LTemQtUnit := OracleTemColuna(AConn, 'msapolo_venda_item', 'qtunit');
+            // vbc_nfe/vicms_nfe: base e valor do ICMS do item como sairam no
+            // XML da NFC-e (gravados em cupom_itens por PreencherItens)
+            LTemVBCNfe := OracleTemColuna(AConn, 'msapolo_venda_item', 'vbc_nfe');
+            LTemVICMSNfe := OracleTemColuna(AConn, 'msapolo_venda_item', 'vicms_nfe');
 
             // SQL fixo: atribuir UMA vez fora do loop (dentro do loop forca
             // re-parse/re-prepare a cada item)
@@ -1687,13 +1691,17 @@ begin
               'ncm, cfop, cest, icms_cst, csosn, aliqicms, ' +
               'pis_cst, cofins_cst, aliqpis, aliqcofins, ' +
               'codvendedor, dtcancel, obscancel, emoferta, ptabela, prod_origem' +
-              IfThen(LTemQtUnit, ', qtunit', '') + ') ' +
+              IfThen(LTemQtUnit, ', qtunit', '') +
+              IfThen(LTemVBCNfe, ', vbc_nfe', '') +
+              IfThen(LTemVICMSNfe, ', vicms_nfe', '') + ') ' +
               'VALUES (:numtrans, :numseqitem, :codprod, :codbarra, ' +
               ':descricao, :unidade, :qt, :punit, :vlprod, :vldesconto, ' +
               ':ncm, :cfop, :cest, :icms_cst, :csosn, :aliqicms, ' +
               ':pis_cst, :cofins_cst, :aliqpis, :aliqcofins, ' +
               ':codvendedor, :dtcancel, :obscancel, :emoferta, :ptabela, :prod_origem' +
-              IfThen(LTemQtUnit, ', :qtunit', '') + ')';
+              IfThen(LTemQtUnit, ', :qtunit', '') +
+              IfThen(LTemVBCNfe, ', :vbc_nfe', '') +
+              IfThen(LTemVICMSNfe, ', :vicms_nfe', '') + ')';
             while not LItens.Eof do
             begin
               LInsert.ParamByName('numtrans').AsLargeInt := LNumTrans;
@@ -1724,6 +1732,10 @@ begin
               LInsert.ParamByName('prod_origem').AsString := LItens.FieldByName('prod_origem').AsString;
               if LTemQtUnit then
                 LInsert.ParamByName('qtunit').AsFloat := LItens.FieldByName('qtunit').AsFloat;
+              if LTemVBCNfe then
+                LInsert.ParamByName('vbc_nfe').AsFloat := LItens.FieldByName('vbc_nfe').AsFloat;
+              if LTemVICMSNfe then
+                LInsert.ParamByName('vicms_nfe').AsFloat := LItens.FieldByName('vicms_nfe').AsFloat;
               LInsert.Execute;
               Inc(LQtdItens);
               LItens.Next;
