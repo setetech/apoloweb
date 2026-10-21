@@ -1,0 +1,975 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8"></head><body><style>
+body.video{margin:0;padding:0;width:1920px;height:1080px;overflow:hidden;background:var(--asfalto)}
+body.video .pag{max-width:none;width:1920px;height:1080px;display:block;gap:0}
+body.video header.cab,body.video h3.sec,body.video .roteiro,body.video .rodape,body.video .controles{display:none}
+body.video .player{position:absolute;left:192px;top:22px;width:1536px;border-radius:18px}
+body.video .palco{width:1536px;height:864px}
+body.video .legenda{padding:20px 30px 18px;gap:24px}
+body.video .legenda .num{font-size:15px}
+body.video .legenda h2{font-size:36px;margin:8px 0 6px}
+body.video .legenda p{font-size:21px;line-height:1.45;max-width:none}
+body.video .legenda .rot{font-size:16px}
+#vbar{position:absolute;left:0;bottom:0;height:6px;width:0;background:var(--rota)}
+/* ?avatar=1 — palco à esquerda; coluna à direita com o índice e o quadro do apresentador (o vídeo do
+   HeyGen é sobreposto pelo ffmpeg exatamente em #avatarCard; veja montar.js) */
+#coluna{display:none}
+body.video.com-avatar .player{left:40px;height:1042px}
+body.video.com-avatar #coluna{display:flex;flex-direction:column;position:absolute;left:1600px;top:22px;width:296px;height:1042px;gap:14px}
+#coluna .marca{font:500 13px/1.3 var(--f-dado);letter-spacing:.1em;text-transform:uppercase;color:var(--mudo);padding:14px 4px 0}
+#coluna .marca b{display:block;margin-top:8px;font:750 30px/1.05 var(--f-display);font-stretch:85%;letter-spacing:0;text-transform:none;color:var(--tinta)}
+#coluna ol{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+#coluna li{font:500 15px/1.3 var(--f-texto);color:var(--mudo);padding:6px 10px;border-left:3px solid transparent;border-radius:0 8px 8px 0}
+#coluna li.feito{color:var(--tinta);opacity:.55}
+#coluna li.atual{color:var(--tinta);font-weight:600;border-left-color:var(--rota);background:var(--painel)}
+#avatarCard{margin-top:auto;height:400px;flex:none;border-radius:18px;background:var(--painel2);border:1px solid var(--linha)}
+</style><title>Instalação do ApoloWeb</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: um "palco" 16:9 em SVG (escala sozinho) + legenda narrada + roteiro em capítulos abaixo.
+   Linguagem visual do mundo do vendedor externo: asfalto, traçado de rota em âmbar, pinos, sinais. */
+:root{
+  --asfalto:#f2f5f7; --painel:#ffffff; --painel2:#e8eef2; --linha:#cfd9e0;
+  --tinta:#13202b; --mudo:#5a6b78; --rota:#c47712; --rota-suave:#f6dcb4;
+  --ok:#1f8f57; --alerta:#c4432c; --azul:#1f78b8; --aviso:#b8860b;
+  --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-texto:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-dado:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-tema]){
+  --asfalto:#0e161e; --painel:#152029; --painel2:#1b2833; --linha:#2b3b48;
+  --tinta:#e7edf2; --mudo:#8e9fad; --rota:#f2a93b; --rota-suave:#4a3517;
+  --ok:#3fbf7f; --alerta:#e8674c; --azul:#4aa3df; --aviso:#e3b341; color-scheme:dark}}
+:root[data-theme="dark"]:not([data-tema]){
+  --asfalto:#0e161e; --painel:#152029; --painel2:#1b2833; --linha:#2b3b48;
+  --tinta:#e7edf2; --mudo:#8e9fad; --rota:#f2a93b; --rota-suave:#4a3517;
+  --ok:#3fbf7f; --alerta:#e8674c; --azul:#4aa3df; --aviso:#e3b341; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--asfalto);color:var(--tinta);font:16px/1.55 var(--f-texto);padding-inline:16px;padding-block:24px 48px}
+.pag{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+header.cab{display:flex;flex-direction:column;gap:6px}
+.olho{font:500 12px/1 var(--f-dado);letter-spacing:.12em;text-transform:uppercase;color:var(--rota)}
+h1{margin:0;font:800 clamp(30px,5vw,52px)/1.02 var(--f-display);font-stretch:80%;letter-spacing:-.01em;text-wrap:balance}
+.lead{margin:0;color:var(--mudo);max-width:64ch}
+
+/* ---- player ---- */
+.player{background:var(--painel);border:1px solid var(--linha);border-radius:14px;overflow:hidden}
+.palco{position:relative;aspect-ratio:16/9;max-width:100%;background:var(--painel2)}
+.palco svg.cena{position:absolute;inset:0;width:100%;height:100%;opacity:0;visibility:hidden;transition:opacity .45s ease}
+.palco svg.cena.ativa{opacity:1;visibility:visible}
+.legenda{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start;padding:16px 20px 6px}
+.legenda .num{font:500 12px/1 var(--f-dado);letter-spacing:.1em;text-transform:uppercase;color:var(--mudo)}
+.legenda h2{margin:6px 0 4px;font:750 clamp(20px,2.6vw,28px)/1.1 var(--f-display);font-stretch:85%;text-wrap:balance}
+.legenda p{margin:0;max-width:70ch;color:var(--tinta)}
+.legenda .rot{font:500 12px/1.3 var(--f-dado);color:var(--rota);white-space:nowrap;padding-top:2px}
+.controles{display:flex;align-items:center;gap:10px;padding:12px 20px 16px;flex-wrap:wrap}
+.btn{font:600 14px/1 var(--f-texto);color:var(--tinta);background:var(--painel2);border:1px solid var(--linha);border-radius:999px;padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.btn:hover{border-color:var(--rota)}
+.btn:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.btn.prim{background:var(--rota);border-color:var(--rota);color:#1a1206}
+.trilho{flex:1;min-width:160px;display:flex;gap:4px}
+.trilho button{flex:1;height:8px;border:0;border-radius:4px;background:var(--linha);cursor:pointer;padding:0;position:relative;overflow:hidden}
+.trilho button i{position:absolute;inset:0;width:0;background:var(--rota)}
+.trilho button.feito i{width:100%}
+.trilho button:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.tempo{font:500 12px/1 var(--f-dado);color:var(--mudo);font-variant-numeric:tabular-nums}
+
+/* ---- roteiro ---- */
+.roteiro{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.cap{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;text-align:left;background:var(--painel);border:1px solid var(--linha);border-radius:10px;padding:12px 14px;cursor:pointer;color:var(--tinta);font:inherit}
+.cap:hover,.cap.atual{border-color:var(--rota)}
+.cap:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.cap b{grid-row:span 2;font:800 22px/1 var(--f-display);font-stretch:75%;color:var(--rota);font-variant-numeric:tabular-nums;padding-top:2px}
+.cap strong{font:600 15px/1.25 var(--f-texto)}
+.cap span{font-size:13.5px;color:var(--mudo);line-height:1.45}
+h3.sec{margin:6px 0 0;font:750 20px/1.2 var(--f-display);font-stretch:85%}
+.rodape{font-size:13px;color:var(--mudo);max-width:72ch}
+
+/* ---- SVG: elementos comuns ---- */
+svg text{font-family:var(--f-texto);fill:var(--tinta)}
+.t-disp{font-family:var(--f-display);font-weight:800;font-stretch:80%}
+.t-dado{font-family:var(--f-dado);font-weight:500}
+.f-painel{fill:var(--painel)} .f-painel2{fill:var(--painel2)} .s-linha{stroke:var(--linha)}
+.f-rota{fill:var(--rota)} .s-rota{stroke:var(--rota)} .f-ok{fill:var(--ok)} .s-ok{stroke:var(--ok)}
+.f-alerta{fill:var(--alerta)} .s-alerta{stroke:var(--alerta)} .f-azul{fill:var(--azul)} .s-azul{stroke:var(--azul)}
+.f-mudo{fill:var(--mudo)} .f-aviso{fill:var(--aviso)} .f-linha{fill:var(--linha)} .f-suave{fill:var(--rota-suave)}
+.sem-fill{fill:none}
+.tx-mudo{fill:var(--mudo)} .tx-escuro{fill:#1a1206} .tx-claro{fill:#ffffff}
+
+/* animações disparam quando a cena fica ativa (.ativa) */
+.cena *{transform-box:fill-box}
+.ativa .surge{animation:surge .6s cubic-bezier(.2,.8,.2,1) both}
+.ativa .cai{animation:cai .55s cubic-bezier(.2,.9,.3,1.2) both;transform-origin:center}
+.ativa .cresce{animation:cresce 1s cubic-bezier(.2,.8,.2,1) both;transform-origin:left center}
+.ativa .sobe{animation:sobe 1s cubic-bezier(.2,.8,.2,1) both;transform-origin:center bottom}
+.ativa .traco{stroke-dasharray:var(--len,1200);stroke-dashoffset:var(--len,1200);animation:traco var(--dur,2.2s) ease-in-out both}
+.ativa .pulso{animation:pulso 1.6s ease-in-out infinite;transform-origin:center}
+.ativa .gira{animation:gira 2.4s cubic-bezier(.3,.7,.2,1) both;transform-origin:50% 100%}
+.ativa .anda{animation:anda 2.2s cubic-bezier(.5,0,.3,1) both}
+.ativa .anel{animation:anel 1.8s ease-out infinite;transform-origin:center}
+.ativa .pisca{animation:pisca .9s ease-in-out 3 both}
+@keyframes surge{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes cai{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:none}}
+@keyframes cresce{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes sobe{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes traco{to{stroke-dashoffset:0}}
+@keyframes pulso{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+@keyframes gira{from{transform:rotate(-90deg)}to{transform:rotate(var(--ang,40deg))}}
+@keyframes anda{0%{opacity:0;transform:translate(0,0)}15%{opacity:1}100%{opacity:1;transform:translate(var(--dx,300px),var(--dy,0px))}}
+@keyframes anel{0%{opacity:.7;transform:scale(.3)}100%{opacity:0;transform:scale(1.6)}}
+@keyframes pisca{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){
+  .ativa .surge,.ativa .cai,.ativa .cresce,.ativa .sobe,.ativa .traco,.ativa .pulso,.ativa .gira,.ativa .anda,.ativa .anel,.ativa .pisca{animation-duration:.01s!important;animation-delay:0s!important;animation-iteration-count:1!important}
+  .palco svg.cena{transition:none}
+}
+@media (max-width:620px){
+  .legenda{grid-template-columns:minmax(0,1fr)}
+  .legenda .rot{white-space:normal}
+  .controles{padding-inline:14px}
+}
+</style>
+
+<style id="temas-colosso">
+/* ===== Temas do Colosso ====================================================================
+   O seletor (#selTema) usa os MESMOS 17 temas das rotinas web (escuro, claro, floresta, sazonais e o
+   automático pela época do ano). themes.css e temas.js abaixo são CÓPIAS SEM ALTERAÇÃO de
+   colosso-delphi-webview/assets/Web — se o tema mudar lá, recopie aqui.
+   Cada tema define --bg/--panel/--txt/--accent...; a regra :root[data-tema] liga essas cores às variáveis
+   das cenas, então as classes f-rota, f-ok, tx-mudo etc. seguem o tema sem mexer em cena nenhuma.
+   ?tema=<id> na URL fixa o tema; no modo de gravação (?video=1) o padrão é "escuro" (o automático muda
+   com a data e o vídeo tem de sair igual sempre). */
+:root[data-tema]{
+  --asfalto:var(--bg); --painel:var(--panel); --painel2:var(--panel2); --linha:var(--line);
+  --tinta:var(--txt); --mudo:var(--muted); --rota:var(--accent); --rota-suave:color-mix(in srgb,var(--accent) 24%,var(--panel));
+  --alerta:var(--err); --azul:var(--accent2); --aviso:var(--warn);
+}
+.cab-topo{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sel-tema{font:500 13px/1.2 var(--f-texto);color:var(--tinta);background:var(--painel);border:1px solid var(--linha);border-radius:999px;padding:7px 12px;cursor:pointer;max-width:240px}
+.sel-tema:hover{border-color:var(--rota)}
+.sel-tema:focus-visible{outline:2px solid var(--rota);outline-offset:2px}
+.olho::after{content:var(--tema-emoji,'');margin-left:8px;letter-spacing:0}
+/* ---- themes.css (cópia) ---- */
+/* ===========================================================================
+   themes.css — temas de cores COMPARTILHADOS das rotinas web Colosso.
+
+   Origem: ROT8010 (BI). Arquivo idêntico em todas as rotinas geradas pela
+   skill colosso-delphi-webview — se editar aqui, replique nas demais (ou
+   atualize o asset da skill, que é a fonte da verdade).
+
+   Cada tema redefine as variáveis CSS de styles.css via html[data-tema="..."]
+   e ainda define:
+     --chart-palette : cores para gráficos multi-série
+     --grafico       : cor principal de gráficos de série única
+     --tema-emoji    : enfeite ao lado do título da rotina
+   O seletor (#selTema) e a persistência ficam em temas.js; a escolha usa a
+   chave localStorage 'colosso.tema', compartilhada entre as rotinas via
+   pasta de dados única do WebView2 ('ColossoWebView').
+   =========================================================================== */
+
+.brand::after{content:var(--tema-emoji,'');margin-left:8px}
+
+/* ---------- ESCURO (padrão — igual ao :root de styles.css) ---------------- */
+html[data-tema="escuro"]{
+  --bg:#0f1419; --panel:#1a2129; --panel2:#222c36; --line:#2d3a46;
+  --txt:#e6edf3; --muted:#8b97a3; --accent:#f2b705; --accent2:#3aa6ff;
+  --ok:#37c871; --warn:#ff9f40; --err:#ff6b6b;
+  --chart-palette:#3aa6ff,#f2b705,#37c871,#ff9f40,#b57bff,#ff6b8a,#4dd8d2,#c8d637,#ff8355,#7f96ff;
+  --grafico:#2b96f5;
+  --tema-emoji:'';
+}
+
+/* ---------- CLARO ---------------------------------------------------------- */
+html[data-tema="claro"]{
+  --bg:#f2f4f7; --panel:#ffffff; --panel2:#e9edf2; --line:#d4dbe3;
+  --txt:#1c2733; --muted:#64748b; --accent:#d97706; --accent2:#2563eb;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#2563eb,#f59e0b,#16a34a,#db2777,#7c3aed,#0891b2,#dc2626,#65a30d,#ea580c,#4f46e5;
+  --grafico:#2563eb;
+  --tema-emoji:'';
+}
+html[data-tema="claro"] .btn-primario,
+html[data-tema="claro"] button.primario{color:#fff}
+
+/* ---------- FLORESTA ------------------------------------------------------- */
+html[data-tema="floresta"]{
+  --bg:#0d1710; --panel:#14231a; --panel2:#1c3024; --line:#2b4a36;
+  --txt:#e4f0e6; --muted:#8fa898; --accent:#a3e635; --accent2:#34d399;
+  --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+  --chart-palette:#34d399,#a3e635,#fbbf24,#5eead4,#86efac,#d9f99d,#f59e0b,#4ade80,#a7f3d0,#bef264;
+  --grafico:#34d399;
+  --tema-emoji:'🌲';
+}
+html[data-tema="floresta"] body{
+  background:radial-gradient(1200px 500px at 85% -10%, rgba(52,211,153,.08), transparent 60%), var(--bg);
+}
+
+/* ---------- FLORIDO -------------------------------------------------------- */
+html[data-tema="florido"]{
+  --bg:#fdf2f6; --panel:#ffffff; --panel2:#fce7f0; --line:#f3cede;
+  --txt:#4a2537; --muted:#a06880; --accent:#db2777; --accent2:#c026d3;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#db2777,#9d4edd,#f472b6,#fb923c,#22c55e,#38bdf8,#e879f9,#facc15,#fb7185,#a78bfa;
+  --grafico:#db2777;
+  --tema-emoji:'🌸';
+}
+html[data-tema="florido"] body{
+  background:radial-gradient(900px 400px at 10% -10%, rgba(219,39,119,.07), transparent 60%),
+             radial-gradient(900px 400px at 95% 110%, rgba(157,78,221,.07), transparent 60%), var(--bg);
+}
+html[data-tema="florido"] .btn-primario,
+html[data-tema="florido"] button.primario{color:#fff}
+
+/* ---------- OCEANO --------------------------------------------------------- */
+html[data-tema="oceano"]{
+  --bg:#071825; --panel:#0c2436; --panel2:#123048; --line:#1e4460;
+  --txt:#e0f2fe; --muted:#7fa8c1; --accent:#22d3ee; --accent2:#38bdf8;
+  --ok:#34d399; --warn:#fbbf24; --err:#fb7185;
+  --chart-palette:#38bdf8,#22d3ee,#818cf8,#34d399,#67e8f9,#0ea5e9,#a5b4fc,#2dd4bf,#7dd3fc,#6366f1;
+  --grafico:#38bdf8;
+  --tema-emoji:'🌊';
+}
+html[data-tema="oceano"] body{
+  background:linear-gradient(180deg, rgba(56,189,248,.05), transparent 300px), var(--bg);
+}
+
+/* ---------- CAFÉ ----------------------------------------------------------- */
+html[data-tema="cafe"]{
+  --bg:#1a120c; --panel:#241a12; --panel2:#2f2318; --line:#46362a;
+  --txt:#f0e6dc; --muted:#a89482; --accent:#e9c46a; --accent2:#d4a373;
+  --ok:#84cc16; --warn:#f4a261; --err:#e76f51;
+  --chart-palette:#d4a373,#e9c46a,#f4a261,#e76f51,#a98467,#ccd5ae,#bc6c25,#dda15e,#faedcd,#b08968;
+  --grafico:#d4a373;
+  --tema-emoji:'☕';
+}
+
+/* ======================= TEMÁTICOS / SAZONAIS ============================= */
+
+/* ---------- NATAL ---------------------------------------------------------- */
+html[data-tema="natal"]{
+  --bg:#0b1f14; --panel:#103322; --panel2:#16402b; --line:#245a3c;
+  --txt:#f2fbf4; --muted:#93b8a0; --accent:#ef4444; --accent2:#f8d24a;
+  --ok:#22c55e; --warn:#fb923c; --err:#f87171;
+  --chart-palette:#ef4444,#f8d24a,#22c55e,#f8fafc,#16a34a,#fca5a5,#fde68a,#86efac,#dc2626,#eab308;
+  --grafico:#ef4444;
+  --tema-emoji:'🎄';
+}
+html[data-tema="natal"] body{
+  background:radial-gradient(700px 300px at 15% -5%, rgba(239,68,68,.10), transparent 60%),
+             radial-gradient(700px 300px at 85% -5%, rgba(248,210,74,.10), transparent 60%), var(--bg);
+}
+html[data-tema="natal"] .btn-primario,
+html[data-tema="natal"] button.primario{color:#3a2503}
+
+/* ---------- ANO NOVO ------------------------------------------------------- */
+html[data-tema="ano-novo"]{
+  --bg:#0c0a14; --panel:#161226; --panel2:#1f1a33; --line:#332b52;
+  --txt:#f4f1ff; --muted:#9d95b8; --accent:#a78bfa; --accent2:#fbbf24;
+  --ok:#34d399; --warn:#fb923c; --err:#fb7185;
+  --chart-palette:#fbbf24,#a78bfa,#f8fafc,#facc15,#c4b5fd,#eab308,#e9d5ff,#fde68a,#8b5cf6,#f5f5f4;
+  --grafico:#fbbf24;
+  --tema-emoji:'🎆';
+}
+html[data-tema="ano-novo"] body{
+  background:radial-gradient(800px 350px at 50% -10%, rgba(251,191,36,.10), transparent 60%), var(--bg);
+}
+html[data-tema="ano-novo"] .btn-primario,
+html[data-tema="ano-novo"] button.primario{color:#33250a}
+
+/* ---------- CARNAVAL ------------------------------------------------------- */
+html[data-tema="carnaval"]{
+  --bg:#150826; --panel:#221040; --panel2:#2d1755; --line:#44257c;
+  --txt:#fdf4ff; --muted:#b79cd4; --accent:#facc15; --accent2:#e879f9;
+  --ok:#a3e635; --warn:#fb923c; --err:#fb7185;
+  --chart-palette:#facc15,#22d3ee,#f472b6,#a3e635,#fb7185,#38bdf8,#c084fc,#fb923c,#4ade80,#e879f9;
+  --grafico:#e879f9;
+  --tema-emoji:'🎭';
+}
+html[data-tema="carnaval"] body{
+  background:linear-gradient(90deg, rgba(250,204,21,.06), rgba(232,121,249,.06), rgba(34,211,238,.06)), var(--bg);
+}
+html[data-tema="carnaval"] .brand b{color:#e879f9}
+html[data-tema="carnaval"] .btn-primario,
+html[data-tema="carnaval"] button.primario{color:#3d0b4e}
+
+/* ---------- PÁSCOA --------------------------------------------------------- */
+html[data-tema="pascoa"]{
+  --bg:#faf6ef; --panel:#ffffff; --panel2:#f3ecfb; --line:#e2d5ef;
+  --txt:#3f2d52; --muted:#8d7ba6; --accent:#a855f7; --accent2:#8b5cf6;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#a78bfa,#f9a8d4,#86efac,#fde68a,#93c5fd,#fdba74,#c4b5fd,#f0abfc,#6ee7b7,#fca5a5;
+  --grafico:#8b5cf6;
+  --tema-emoji:'🐰';
+}
+html[data-tema="pascoa"] .btn-primario,
+html[data-tema="pascoa"] button.primario{color:#fff}
+
+/* ---------- DIA DAS MÃES --------------------------------------------------- */
+html[data-tema="maes"]{
+  --bg:#faf5f7; --panel:#ffffff; --panel2:#fbe8ee; --line:#efd0da;
+  --txt:#511f33; --muted:#a57389; --accent:#e11d48; --accent2:#db2777;
+  --ok:#16a34a; --warn:#ea580c; --err:#dc2626;
+  --chart-palette:#e11d48,#f472b6,#c026d3,#fb7185,#a855f7,#fda4af,#db2777,#f9a8d4,#9d174d,#e879f9;
+  --grafico:#e11d48;
+  --tema-emoji:'💐';
+}
+html[data-tema="maes"] .btn-primario,
+html[data-tema="maes"] button.primario{color:#fff}
+
+/* ---------- DIA DOS PAIS --------------------------------------------------- */
+html[data-tema="pais"]{
+  --bg:#10151c; --panel:#1a222d; --panel2:#232e3c; --line:#37455a;
+  --txt:#e8edf4; --muted:#8c9bb0; --accent:#c8a24b; --accent2:#60a5fa;
+  --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+  --chart-palette:#60a5fa,#c8a24b,#94a3b8,#3b82f6,#e2c17a,#64748b,#93c5fd,#a16207,#475569,#2563eb;
+  --grafico:#60a5fa;
+  --tema-emoji:'👔';
+}
+
+/* ---------- FESTA JUNINA --------------------------------------------------- */
+html[data-tema="junina"]{
+  --bg:#221208; --panel:#2f1c0e; --panel2:#3c2513; --line:#5a3a20;
+  --txt:#fdf3e3; --muted:#c2a284; --accent:#f59e0b; --accent2:#fb923c;
+  --ok:#84cc16; --warn:#facc15; --err:#ef4444;
+  --chart-palette:#ef4444,#f59e0b,#22c55e,#3b82f6,#eab308,#ec4899,#fb923c,#84cc16,#f87171,#fde047;
+  --grafico:#fb923c;
+  --tema-emoji:'🎪';
+}
+html[data-tema="junina"] body{
+  /* bandeirinhas discretas no topo */
+  background:linear-gradient(90deg,
+      rgba(239,68,68,.10) 0 12.5%, rgba(245,158,11,.10) 0 25%,
+      rgba(34,197,94,.10) 0 37.5%, rgba(59,130,246,.10) 0 50%,
+      rgba(234,179,8,.10) 0 62.5%, rgba(236,72,153,.10) 0 75%,
+      rgba(251,146,60,.10) 0 87.5%, rgba(132,204,22,.10) 0 100%) top/100% 6px no-repeat, var(--bg);
+}
+html[data-tema="junina"] .btn-primario,
+html[data-tema="junina"] button.primario{color:#3a2503}
+
+/* ---------- DIA DAS CRIANÇAS ----------------------------------------------- */
+html[data-tema="criancas"]{
+  --bg:#f0f7ff; --panel:#ffffff; --panel2:#e3effd; --line:#c9dcf5;
+  --txt:#1e3a5f; --muted:#6b87a8; --accent:#f59e0b; --accent2:#3b82f6;
+  --ok:#22c55e; --warn:#fb923c; --err:#ef4444;
+  --chart-palette:#ef4444,#3b82f6,#facc15,#22c55e,#a855f7,#fb923c,#ec4899,#06b6d4,#84cc16,#6366f1;
+  --grafico:#3b82f6;
+  --tema-emoji:'🧸';
+}
+html[data-tema="criancas"] .btn-primario,
+html[data-tema="criancas"] button.primario{color:#fff}
+html[data-tema="criancas"] .kpi-card{border-top-width:6px}
+
+/* ---------- HALLOWEEN ------------------------------------------------------ */
+html[data-tema="halloween"]{
+  --bg:#120a18; --panel:#1d1226; --panel2:#271833; --line:#3f284f;
+  --txt:#f5ead9; --muted:#a893b8; --accent:#a855f7; --accent2:#f97316;
+  --ok:#84cc16; --warn:#facc15; --err:#e11d48;
+  --chart-palette:#f97316,#a855f7,#84cc16,#facc15,#e11d48,#fb923c,#c084fc,#a3e635,#f59e0b,#7c3aed;
+  --grafico:#f97316;
+  --tema-emoji:'🎃';
+}
+html[data-tema="halloween"] body{
+  background:radial-gradient(800px 350px at 80% -10%, rgba(249,115,22,.10), transparent 60%), var(--bg);
+}
+html[data-tema="halloween"] .btn-primario,
+html[data-tema="halloween"] button.primario{color:#341303}
+
+/* ---------- BLACK FRIDAY --------------------------------------------------- */
+html[data-tema="blackfriday"]{
+  --bg:#0a0a0a; --panel:#151515; --panel2:#1f1f1f; --line:#333333;
+  --txt:#f5f5f5; --muted:#8f8f8f; --accent:#facc15; --accent2:#eab308;
+  --ok:#22c55e; --warn:#fb923c; --err:#ef4444;
+  --chart-palette:#facc15,#f5f5f5,#ef4444,#a3a3a3,#eab308,#fde047,#737373,#fca5a5,#d4d4d4,#f59e0b;
+  --grafico:#facc15;
+  --tema-emoji:'🛍️';
+}
+html[data-tema="blackfriday"] .brand b{color:#facc15}
+html[data-tema="blackfriday"] .btn-primario,
+html[data-tema="blackfriday"] button.primario{color:#292103}
+
+</style>
+
+<div class="pag">
+  <header class="cab">
+    <div class="cab-topo"><span class="olho">Colosso · ApoloWeb · Suporte técnico</span>
+      <select id="selTema" class="sel-tema" aria-label="Tema de cores (os mesmos das rotinas Colosso)" title="Tema de cores — os mesmos das rotinas Colosso"></select></div>
+    <h1>Instalação do ApoloWeb</h1>
+    <p class="lead">Do Windows limpo à primeira NFC-e: pré-requisitos, pasta C:Apolo, conexão Oracle, cadastro do caixa pelo serial do disco, impressora, TEF e teste de aceite.</p>
+  </header>
+
+  <section class="player" aria-label="Animação do processo">
+    <div class="palco" id="palco">
+
+      <!-- 1 · abertura: esteira de 5 etapas -->
+      <svg class="cena ativa" viewBox="0 0 960 540" data-dur="8500" role="img" aria-label="Cinco etapas da instalação: Windows, arquivos, banco, periféricos e teste">
+        <text x="60" y="88" class="t-dado f-rota surge" font-size="16" letter-spacing="3">SUPORTE TÉCNICO · INSTALAÇÃO</text>
+        <text x="60" y="162" class="t-disp surge" font-size="66" style="animation-delay:.2s">Instalar um caixa</text>
+        <text x="60" y="232" class="t-disp f-rota surge" font-size="66" style="animation-delay:.4s">ApoloWeb</text>
+        <path class="sem-fill s-rota traco" style="--len:720;--dur:2.4s;animation-delay:.6s" stroke-width="5" stroke-linecap="round" d="M120 370 H840"/>
+        <g class="cai" style="animation-delay:.9s"><circle cx="120" cy="370" r="34" class="f-painel s-rota" stroke-width="3"/><text x="120" y="381" text-anchor="middle" class="t-disp" font-size="30">1</text>
+          <text x="120" y="446" text-anchor="middle" class="t-disp" font-size="22">Windows</text><text x="120" y="472" text-anchor="middle" class="tx-mudo" font-size="15">WebView2 · rede</text></g>
+        <g class="cai" style="animation-delay:1.4s"><circle cx="300" cy="370" r="34" class="f-painel s-rota" stroke-width="3"/><text x="300" y="381" text-anchor="middle" class="t-disp" font-size="30">2</text>
+          <text x="300" y="446" text-anchor="middle" class="t-disp" font-size="22">Arquivos</text><text x="300" y="472" text-anchor="middle" class="t-dado tx-mudo" font-size="14">C:\Apolo\</text></g>
+        <g class="cai" style="animation-delay:1.9s"><circle cx="480" cy="370" r="34" class="f-painel s-rota" stroke-width="3"/><text x="480" y="381" text-anchor="middle" class="t-disp" font-size="30">3</text>
+          <text x="480" y="446" text-anchor="middle" class="t-disp" font-size="22">Banco</text><text x="480" y="472" text-anchor="middle" class="tx-mudo" font-size="15">Oracle · caixa</text></g>
+        <g class="cai" style="animation-delay:2.4s"><circle cx="660" cy="370" r="34" class="f-painel s-rota" stroke-width="3"/><text x="660" y="381" text-anchor="middle" class="t-disp" font-size="30">4</text>
+          <text x="660" y="446" text-anchor="middle" class="t-disp" font-size="22">Periféricos</text><text x="660" y="472" text-anchor="middle" class="tx-mudo" font-size="15">impressora · TEF</text></g>
+        <g class="cai" style="animation-delay:2.9s"><circle cx="840" cy="370" r="34" class="f-ok"/><path d="M826 370 l10 10 l18 -20" class="sem-fill" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="840" y="446" text-anchor="middle" class="t-disp" font-size="22">Teste</text><text x="840" y="472" text-anchor="middle" class="tx-mudo" font-size="15">venda + NFC-e</text></g>
+      </svg>
+
+      <!-- 2 · pré-requisitos + pilha do WebView2 -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10000" role="img" aria-label="Checklist da máquina e a pilha ApoloWeb, WebView2Loader, WebView2 Runtime e tela HTML">
+        <rect x="40" y="56" width="420" height="428" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="64" y="98" class="t-disp" font-size="26">Checklist da máquina</text>
+        <g class="surge" style="animation-delay:.5s"><circle cx="78" cy="154" r="14" class="f-ok"/><path d="M71 154 l5 5 l10 -11" class="sem-fill" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="104" y="152" font-size="18" font-weight="600">Windows 10 ou 11</text><text x="104" y="176" class="tx-mudo" font-size="14">usuário com escrita em C:\Apolo</text></g>
+        <g class="surge" style="animation-delay:1.1s"><circle cx="78" cy="236" r="14" class="f-ok"/><path d="M71 236 l5 5 l10 -11" class="sem-fill" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="104" y="234" font-size="18" font-weight="600">ApoloWeb é Win32 (32 bits)</text><text x="104" y="258" class="tx-mudo" font-size="14">roda em Windows de 32 ou 64 bits</text></g>
+        <g class="surge" style="animation-delay:1.7s"><circle cx="78" cy="318" r="14" class="f-ok"/><path d="M71 318 l5 5 l10 -11" class="sem-fill" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="104" y="316" font-size="18" font-weight="600">WebView2 Runtime 89 ou superior</text><text x="104" y="340" class="tx-mudo" font-size="14">o motor do Edge que desenha a tela</text></g>
+        <g class="surge" style="animation-delay:2.3s"><circle cx="78" cy="400" r="14" class="f-ok"/><path d="M71 400 l5 5 l10 -11" class="sem-fill" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="104" y="398" font-size="18" font-weight="600">Rede até o Oracle</text><text x="104" y="422" class="tx-mudo" font-size="14">IP e porta do listener liberados</text></g>
+        <!-- pilha -->
+        <g class="surge" style="animation-delay:2.9s"><rect x="500" y="56" width="420" height="58" rx="10" class="f-painel s-linha" stroke-width="2"/>
+          <text x="524" y="82" class="t-dado" font-size="17">ApoloWeb.exe</text><text x="524" y="103" class="tx-mudo" font-size="13">Delphi · TEdgeBrowser</text></g>
+        <path d="M710 116 v24 m-7 -8 l7 8 l7 -8" class="sem-fill s-rota surge" stroke-width="2.5" stroke-linecap="round" style="animation-delay:3.2s"/>
+        <g class="surge" style="animation-delay:3.4s"><rect x="500" y="144" width="420" height="58" rx="10" class="f-painel s-rota" stroke-width="2"/>
+          <text x="524" y="170" class="t-dado" font-size="17">WebView2Loader.dll</text><text x="524" y="191" class="tx-mudo" font-size="13">na pasta do exe · x86 · versão 1.0</text></g>
+        <path d="M710 204 v24 m-7 -8 l7 8 l7 -8" class="sem-fill s-rota surge" stroke-width="2.5" stroke-linecap="round" style="animation-delay:3.7s"/>
+        <g class="surge" style="animation-delay:3.9s"><rect x="500" y="232" width="420" height="58" rx="10" class="f-painel s-linha" stroke-width="2"/>
+          <text x="524" y="258" class="t-dado" font-size="17">WebView2 Runtime</text><text x="524" y="279" class="tx-mudo" font-size="13">instalado no Windows (Edge)</text></g>
+        <path d="M710 292 v24 m-7 -8 l7 8 l7 -8" class="sem-fill s-rota surge" stroke-width="2.5" stroke-linecap="round" style="animation-delay:4.2s"/>
+        <g class="surge" style="animation-delay:4.4s"><rect x="500" y="320" width="420" height="58" rx="10" class="f-suave"/>
+          <text x="524" y="346" class="t-dado" font-size="17">Tela HTML · CSS · JS</text><text x="524" y="367" class="t-dado tx-mudo" font-size="13">C:\Apolo\web\</text></g>
+        <g class="surge" style="animation-delay:5s"><rect x="500" y="402" width="420" height="82" rx="10" class="f-painel s-linha" stroke-width="1.5"/>
+          <text x="520" y="428" class="tx-mudo" font-size="13">versão do Runtime no registro (valor pv):</text>
+          <text x="520" y="450" class="t-dado" font-size="12">HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\</text>
+          <text x="520" y="470" class="t-dado" font-size="12">Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}</text></g>
+      </svg>
+
+      <!-- 3 · a pasta C:\Apolo -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11000" role="img" aria-label="Árvore da pasta C:\Apolo com os arquivos que o suporte copia e os que o app cria sozinho">
+        <rect x="40" y="48" width="560" height="452" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="64" y="86" class="t-dado f-rota" font-size="22">C:\Apolo\</text>
+        <text x="64" y="110" class="tx-mudo" font-size="14">o que o suporte copia</text>
+        <g class="t-dado" font-size="14">
+          <g class="surge" style="animation-delay:.4s"><text class="t-dado" x="70" y="150">├─ ApoloWeb.exe</text><text x="300" y="150" class="tx-mudo t-dado">executável · tela web embutida</text></g>
+          <g class="surge" style="animation-delay:.8s"><text class="t-dado" x="70" y="180">├─ WebView2Loader.dll</text><text x="300" y="180" class="tx-mudo t-dado">x86 · versão 1.0.x</text></g>
+          <g class="surge" style="animation-delay:1.3s"><text class="t-dado" x="70" y="210">├─ libcrypto-1_1.dll</text><text class="t-dado" x="70" y="240">├─ libssl-1_1.dll</text>
+            <path d="M262 199 h8 v46 h-8" class="sem-fill s-rota" stroke-width="2"/><text x="300" y="229" class="f-rota t-dado" font-weight="600">OpenSSL 1.1 · conexão TLS</text></g>
+          <g class="surge" style="animation-delay:1.9s"><text class="t-dado" x="70" y="270">├─ libxml2.dll</text><text class="t-dado" x="70" y="300">├─ libxslt.dll</text><text class="t-dado" x="70" y="330">├─ libexslt.dll</text><text class="t-dado" x="70" y="360">├─ libiconv.dll</text>
+            <path d="M262 259 h8 v106 h-8" class="sem-fill s-rota" stroke-width="2"/><text x="300" y="319" class="f-rota t-dado" font-weight="600">libxml · assina o XML</text></g>
+          <g class="surge" style="animation-delay:2.5s"><text class="t-dado" x="70" y="390">├─ Schemas\</text><text x="300" y="390" class="tx-mudo t-dado">XSD da NFC-e</text></g>
+          <g class="surge" style="animation-delay:2.9s"><text class="t-dado" x="70" y="420">├─ PrintCupon.exe</text><text x="300" y="420" class="tx-mudo t-dado">só na impressão por PDF</text></g>
+          <g class="surge" style="animation-delay:3.3s"><text class="t-dado" x="70" y="450">└─ apoloweb.ini</text><text x="300" y="450" class="tx-mudo t-dado">conexão · TEF · impressora</text></g>
+        </g>
+        <!-- criados pelo app -->
+        <rect x="630" y="48" width="290" height="452" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="654" y="86" class="t-disp" font-size="22">O app cria sozinho</text>
+        <text x="654" y="110" class="tx-mudo" font-size="14">no primeiro boot</text>
+        <g class="t-dado" font-size="15">
+          <g class="cai" style="animation-delay:3.9s"><circle cx="662" cy="150" r="5" class="f-ok"/><text class="t-dado" x="678" y="155">web\</text></g>
+          <g class="cai" style="animation-delay:4.1s"><circle cx="662" cy="184" r="5" class="f-ok"/><text class="t-dado" x="678" y="189">ApoloWeb.db</text></g>
+          <g class="cai" style="animation-delay:4.3s"><circle cx="662" cy="218" r="5" class="f-ok"/><text class="t-dado" x="678" y="223">NFC-e\</text></g>
+          <g class="cai" style="animation-delay:4.5s"><circle cx="662" cy="252" r="5" class="f-ok"/><text class="t-dado" x="678" y="257">logs\</text></g>
+          <g class="cai" style="animation-delay:4.7s"><circle cx="662" cy="286" r="5" class="f-ok"/><text class="t-dado" x="678" y="291">certificado.pfx</text></g>
+          <g class="cai" style="animation-delay:4.9s"><circle cx="662" cy="320" r="5" class="f-ok"/><text class="t-dado" x="678" y="325">logo_nfce.png</text></g>
+        </g>
+        <g class="surge" style="animation-delay:5.6s"><rect x="650" y="372" width="250" height="108" rx="10" class="f-painel2 s-alerta" stroke-width="2"/>
+          <text x="668" y="404" font-size="15" font-weight="600">Faltou OpenSSL ou libxml?</text>
+          <text x="668" y="428" class="tx-mudo" font-size="14">a NFC-e não é assinada</text>
+          <text x="668" y="452" class="tx-mudo" font-size="14">e a nota não sai.</text></g>
+      </svg>
+
+      <!-- 4 · primeiro boot -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10500" role="img" aria-label="Sequência do primeiro boot: extrai a web, cria o SQLite, lê o serial do disco, lê o ini e conecta ao Oracle">
+        <rect x="40" y="52" width="880" height="352" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="64" y="88" class="t-dado tx-mudo" font-size="15">ApoloWeb.exe · primeira execução</text>
+        <path class="sem-fill s-linha traco" style="--len:200;--dur:3.4s;animation-delay:.4s" stroke-width="3" d="M80 140 V340"/>
+        <g font-size="16">
+          <g class="surge" style="animation-delay:.4s"><circle cx="80" cy="140" r="13" class="f-rota"/><text x="80" y="145" text-anchor="middle" class="tx-escuro" font-size="13" font-weight="700">1</text>
+            <text x="106" y="146" class="t-dado">ExtrairWebAssets</text><text x="470" y="146" class="tx-mudo">→ grava C:\Apolo\web\ (a cada início)</text></g>
+          <g class="surge" style="animation-delay:1.2s"><circle cx="80" cy="190" r="13" class="f-rota"/><text x="80" y="195" text-anchor="middle" class="tx-escuro" font-size="13" font-weight="700">2</text>
+            <text x="106" y="196" class="t-dado">SQLite · CriarBanco</text><text x="470" y="196" class="tx-mudo">→ C:\Apolo\ApoloWeb.db</text></g>
+          <g class="surge" style="animation-delay:2s"><circle cx="80" cy="240" r="13" class="f-rota"/><text x="80" y="245" text-anchor="middle" class="tx-escuro" font-size="13" font-weight="700">3</text>
+            <text x="106" y="246" class="t-dado">GetVolumeInformation('C:\')</text><text x="470" y="246" class="tx-mudo">→ serial do volume: 2783519046</text></g>
+          <g class="surge" style="animation-delay:2.8s"><circle cx="80" cy="290" r="13" class="f-rota"/><text x="80" y="295" text-anchor="middle" class="tx-escuro" font-size="13" font-weight="700">4</text>
+            <text x="106" y="296" class="t-dado">lê apoloweb.ini</text><text x="470" y="296" class="t-dado tx-mudo" font-size="15">→ [oracle]  [TEF]  [impressao]</text></g>
+          <g class="surge" style="animation-delay:3.6s"><circle cx="80" cy="340" r="13" class="f-ok"/><text x="80" y="345" text-anchor="middle" class="tx-claro" font-size="13" font-weight="700">5</text>
+            <text x="106" y="346" class="t-dado">UniDAC · Direct=True</text><text x="470" y="346" class="tx-mudo">→ conecta no Oracle sem client</text></g>
+        </g>
+        <g class="surge" style="animation-delay:4.6s"><rect x="40" y="428" width="880" height="64" rx="12" class="f-suave"/>
+          <text x="64" y="467" font-size="19" font-weight="600">Modo Direct: não instala Oracle Client nem tnsnames.ora</text></g>
+      </svg>
+
+      <!-- 5 · apoloweb.ini e janela de configuração -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11000" role="img" aria-label="Seção oracle do apoloweb.ini e a janela de configuração de conexão com teste e senha de administrador">
+        <rect x="40" y="60" width="400" height="300" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="64" y="94" class="t-dado tx-mudo" font-size="14">C:\Apolo\apoloweb.ini</text>
+        <g class="t-dado" font-size="17">
+          <text x="64" y="140" class="f-rota surge t-dado" style="animation-delay:.3s">[oracle]</text>
+          <text x="64" y="176" class="surge t-dado" style="animation-delay:.6s">server=192.168.0.10:1521/ORCL</text>
+          <text x="64" y="212" class="surge t-dado" style="animation-delay:.9s">port=1521</text>
+          <text x="64" y="248" class="surge t-dado" style="animation-delay:1.2s">username=COLOSSO</text>
+          <text x="64" y="284" class="surge t-dado" style="animation-delay:1.5s">password=••••••</text>
+        </g>
+        <text x="64" y="336" class="tx-mudo surge" font-size="14" style="animation-delay:1.9s">server = host:porta/serviço do Oracle</text>
+        <g class="surge" style="animation-delay:2.4s"><rect x="40" y="384" width="400" height="80" rx="12" class="f-painel s-linha" stroke-width="1.5"/>
+          <rect x="40" y="384" width="8" height="80" rx="4" class="f-aviso"/>
+          <text x="66" y="418" font-size="16" font-weight="600">A janela abre sozinha quando</text>
+          <text x="66" y="442" class="tx-mudo" font-size="15">não há Oracle nem cache local</text></g>
+        <!-- janela -->
+        <g class="surge" style="animation-delay:2.9s">
+          <rect x="480" y="60" width="440" height="420" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="504" y="94" class="t-disp" font-size="21">Configuração de conexão</text>
+          <path d="M480 108 H920" class="s-linha" stroke-width="1.5"/>
+          <g font-size="14">
+            <text x="504" y="142" class="tx-mudo">Servidor</text><rect x="620" y="122" width="276" height="30" rx="6" class="f-painel2 s-linha"/><text x="632" y="142" class="t-dado">192.168.0.10:1521/ORCL</text>
+            <text x="504" y="182" class="tx-mudo">Porta</text><rect x="620" y="162" width="276" height="30" rx="6" class="f-painel2 s-linha"/><text x="632" y="182" class="t-dado">1521</text>
+            <text x="504" y="222" class="tx-mudo">Usuário</text><rect x="620" y="202" width="276" height="30" rx="6" class="f-painel2 s-linha"/><text x="632" y="222" class="t-dado">COLOSSO</text>
+            <text x="504" y="262" class="tx-mudo">Senha</text><rect x="620" y="242" width="276" height="30" rx="6" class="f-painel2 s-linha"/><text x="632" y="262" class="t-dado">••••••</text>
+          </g>
+          <rect x="504" y="286" width="110" height="32" rx="8" class="f-azul"/><text x="559" y="307" text-anchor="middle" class="tx-claro" font-size="14" font-weight="600">Testar</text>
+          <path d="M480 334 H920" class="s-linha" stroke-width="1.5"/>
+          <g font-size="14">
+            <text x="504" y="364" class="tx-mudo">Próxima NFC-e</text><rect x="620" y="344" width="276" height="30" rx="6" class="f-painel2 s-linha"/><text x="632" y="364" class="t-dado">1</text>
+            <text x="504" y="404" class="tx-mudo">Senha admin</text><rect x="620" y="384" width="276" height="30" rx="6" class="f-painel2 s-rota"/><text x="632" y="404" class="t-dado">••••••</text>
+          </g>
+        </g>
+        <text x="630" y="308" class="f-ok surge" font-size="15" font-weight="600" style="animation-delay:4.4s">Conexão OK!</text>
+        <g class="cai" style="animation-delay:5.6s"><rect x="786" y="430" width="110" height="34" rx="8" class="f-rota"/><text x="841" y="452" text-anchor="middle" class="tx-escuro" font-size="15" font-weight="700">Salvar</text></g>
+      </svg>
+
+      <!-- 6 · cadastro do caixa pelo serial -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11500" role="img" aria-label="Mensagem de caixa não cadastrado com o serial do disco e a nova linha na tabela msapolo_caixa">
+        <g class="surge" style="animation-delay:.3s">
+          <rect x="40" y="70" width="420" height="250" rx="14" class="f-painel s-alerta" stroke-width="2"/>
+          <circle cx="84" cy="116" r="20" class="f-alerta"/><text x="84" y="124" text-anchor="middle" class="tx-claro t-disp" font-size="24">!</text>
+          <text x="118" y="124" class="t-disp" font-size="22">ApoloWeb</text>
+          <text x="64" y="180" font-size="17">Caixa não cadastrado para este HD.</text>
+          <text x="64" y="212" font-size="17">Serial HD:</text>
+          <text x="64" y="244" font-size="15" class="tx-mudo">Cadastre o caixa na tabela</text>
+          <text x="64" y="268" class="t-dado tx-mudo" font-size="15">msapolo_caixa.</text>
+          <rect x="384" y="276" width="56" height="30" rx="6" class="f-painel2 s-linha"/><text x="412" y="296" text-anchor="middle" font-size="14">OK</text>
+        </g>
+        <text x="156" y="212" class="t-dado f-rota cai" font-size="18" font-weight="600" style="animation-delay:1.3s">2783519046</text>
+        <!-- tabela -->
+        <g class="surge" style="animation-delay:2.2s">
+          <rect x="500" y="70" width="420" height="250" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="520" y="104" class="t-dado f-rota" font-size="18">msapolo_caixa</text>
+          <rect x="512" y="120" width="396" height="34" rx="6" class="f-painel2"/>
+          <g class="t-dado" font-size="13">
+            <text x="522" y="142" class="tx-mudo t-dado">codfilial</text><text x="610" y="142" class="tx-mudo t-dado">numcaixa</text><text x="700" y="142" class="tx-mudo t-dado">numseriehd</text><text x="822" y="142" class="tx-mudo t-dado">serie_nfce</text>
+            <text class="t-dado" x="522" y="186">1</text><text class="t-dado" x="610" y="186">1</text><text class="t-dado" x="700" y="186">1094422871</text><text class="t-dado" x="822" y="186">1</text>
+            <text class="t-dado" x="522" y="222">1</text><text class="t-dado" x="610" y="222">2</text><text class="t-dado" x="700" y="222">3310076524</text><text class="t-dado" x="822" y="222">2</text>
+          </g>
+          <path d="M512 200 H908" class="s-linha" stroke-width="1"/>
+        </g>
+        <g class="anda" style="--dx:0px;--dy:-24px;animation-delay:3.4s;animation-duration:1.2s">
+          <rect x="512" y="260" width="396" height="36" rx="6" class="f-suave"/>
+          <g class="t-dado" font-size="13" font-weight="600"><text class="t-dado" x="522" y="283">1</text><text class="t-dado" x="610" y="283">3</text><text x="700" y="283" class="f-rota t-dado">2783519046</text><text class="t-dado" x="822" y="283">3</text></g>
+        </g>
+        <g class="surge" style="animation-delay:5s"><rect x="40" y="350" width="880" height="140" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="64" y="388" font-size="18" font-weight="600">O serial é o número do volume C:, não o serial físico do disco.</text>
+          <text x="64" y="420" class="tx-mudo" font-size="16">Formatou ou trocou o disco? O serial muda: atualize numseriehd no cadastro.</text>
+          <text x="64" y="452" class="tx-mudo" font-size="16">No prompt, o comando <tspan class="t-dado f-rota">vol C:</tspan> mostra o mesmo número em hexadecimal.</text></g>
+      </svg>
+
+      <!-- 7 · dados fiscais da filial -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11000" role="img" aria-label="Da tabela msfilial saem o certificado PFX, o logotipo e o cache fiscal no SQLite">
+        <g class="surge" style="animation-delay:.3s">
+          <rect x="40" y="60" width="340" height="384" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="64" y="96" class="t-dado f-rota" font-size="18">msfilial</text><text x="164" y="96" class="tx-mudo" font-size="14">(Oracle)</text>
+          <g class="t-dado" font-size="15">
+            <text class="t-dado" x="64" y="146">certificado_digital</text>
+            <text class="t-dado" x="64" y="186">senha_certificado</text>
+            <text class="t-dado" x="64" y="226">csc · idcsc</text>
+            <text class="t-dado" x="64" y="266">ambiente_nfe</text>
+            <text class="t-dado" x="64" y="306">uf_web_service_nfe</text>
+            <text class="t-dado" x="64" y="346">logo_nfe</text>
+            <text x="64" y="386" class="tx-mudo t-dado">cnpj · ie · endereço</text>
+          </g>
+        </g>
+        <path class="sem-fill s-rota traco" style="--len:200;--dur:1s;animation-delay:1.4s" stroke-width="2.5" d="M380 142 C 450 142 450 116 520 116"/>
+        <path class="sem-fill s-rota traco" style="--len:200;--dur:1s;animation-delay:2.4s" stroke-width="2.5" d="M380 342 C 450 342 450 394 520 394"/>
+        <path class="sem-fill s-rota traco" style="--len:200;--dur:1s;animation-delay:3.4s" stroke-width="2.5" d="M380 246 C 450 246 450 262 520 262"/>
+        <g class="surge" style="animation-delay:1.9s"><rect x="520" y="60" width="400" height="112" rx="12" class="f-painel s-rota" stroke-width="2"/>
+          <text x="544" y="94" class="t-dado" font-size="17">C:\Apolo\certificado.pfx</text>
+          <text x="544" y="122" class="tx-mudo" font-size="14">gravado a partir do BLOB a cada conexão</text>
+          <text x="544" y="148" font-size="14" font-weight="600">o ACBr lê o PFX: não importa no Windows</text></g>
+        <g class="surge" style="animation-delay:2.9s"><rect x="520" y="352" width="400" height="84" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="544" y="386" class="t-dado" font-size="17">C:\Apolo\logo_nfce.png</text>
+          <text x="544" y="414" class="tx-mudo" font-size="14">logotipo do DANFE da NFC-e</text></g>
+        <g class="surge" style="animation-delay:3.9s"><rect x="520" y="190" width="400" height="144" rx="12" class="f-painel s-linha" stroke-width="2"/>
+          <text x="544" y="224" class="t-dado" font-size="17">ApoloWeb.db · cache</text>
+          <text x="544" y="254" class="t-dado tx-mudo" font-size="13">CSC · IDCSC · AMBIENTE_NFE</text>
+          <text x="544" y="278" class="t-dado tx-mudo" font-size="13">SENHA_CERTIFICADO · UF_WEBSERVICE</text>
+          <text x="544" y="308" class="t-dado tx-mudo" font-size="13">CODFILIAL · NUMCAIXA</text></g>
+        <g class="surge" style="animation-delay:5s"><rect x="40" y="464" width="880" height="56" rx="12" class="f-suave"/>
+          <text x="64" y="499" font-size="18" font-weight="600">Sem Oracle no boot? O caixa abre com o PFX e o cache local.</text></g>
+      </svg>
+
+      <!-- 8 · impressora -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11500" role="img" aria-label="Seção impressao do ini, modos ESCPOS e SUMATRA, portas, colunas e o teste de impressão">
+        <rect x="40" y="52" width="430" height="290" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="64" y="86" class="t-dado tx-mudo" font-size="14">C:\Apolo\apoloweb.ini</text>
+        <g class="t-dado" font-size="16">
+          <text x="64" y="126" class="f-rota surge t-dado" style="animation-delay:.3s">[impressao]</text>
+          <text x="64" y="162" class="surge t-dado" style="animation-delay:.6s">modo=ESCPOS</text>
+          <text x="64" y="198" class="surge t-dado" style="animation-delay:.9s">impressora=ELGIN i8</text>
+          <text x="64" y="234" class="surge t-dado" style="animation-delay:1.2s">escpos_modelo=ppEscPosEpson</text>
+          <text x="64" y="270" class="surge t-dado" style="animation-delay:1.5s">escpos_porta=</text>
+          <text x="64" y="306" class="surge t-dado" style="animation-delay:1.8s">escpos_colunas=48</text>
+        </g>
+        <text x="216" y="270" class="tx-mudo surge" font-size="13" style="animation-delay:1.6s">vazio = RAW:&lt;impressora&gt;</text>
+        <text x="64" y="378" class="tx-mudo surge" font-size="14" style="animation-delay:2.3s">escpos_porta</text>
+        <g class="cai" style="animation-delay:2.5s"><rect x="40" y="390" width="134" height="32" rx="16" class="f-painel s-linha" stroke-width="1.5"/><text x="107" y="411" text-anchor="middle" class="t-dado" font-size="13">RAW:ELGIN i8</text></g>
+        <g class="cai" style="animation-delay:2.7s"><rect x="184" y="390" width="70" height="32" rx="16" class="f-painel s-linha" stroke-width="1.5"/><text x="219" y="411" text-anchor="middle" class="t-dado" font-size="13">COM3</text></g>
+        <g class="cai" style="animation-delay:2.9s"><rect x="264" y="390" width="206" height="32" rx="16" class="f-painel s-linha" stroke-width="1.5"/><text x="367" y="411" text-anchor="middle" class="t-dado" font-size="13">TCP:192.168.0.50:9100</text></g>
+        <text x="64" y="454" class="tx-mudo surge" font-size="14" style="animation-delay:3.2s">escpos_colunas</text>
+        <g class="cai" style="animation-delay:3.4s"><rect x="40" y="466" width="160" height="32" rx="16" class="f-rota"/><text x="120" y="487" text-anchor="middle" class="tx-escuro" font-size="14" font-weight="600">48 · bobina 80 mm</text></g>
+        <g class="cai" style="animation-delay:3.6s"><rect x="210" y="466" width="160" height="32" rx="16" class="f-painel s-linha" stroke-width="1.5"/><text x="290" y="487" text-anchor="middle" font-size="14" font-weight="600">32 · bobina 58 mm</text></g>
+        <!-- modos -->
+        <g class="surge" style="animation-delay:4.2s"><rect x="500" y="52" width="420" height="140" rx="14" class="f-painel s-rota" stroke-width="2.5"/>
+          <text x="524" y="90" class="t-dado f-rota" font-size="19">modo=ESCPOS</text>
+          <text x="524" y="124" font-size="16" font-weight="600">direto na térmica, pelo ACBr</text>
+          <text x="524" y="152" class="tx-mudo" font-size="14">sem PDF · impressão instantânea</text>
+          <text x="524" y="176" class="tx-mudo" font-size="14">recomendado</text></g>
+        <g class="surge" style="animation-delay:4.9s"><rect x="500" y="208" width="420" height="134" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="524" y="246" class="t-dado" font-size="19">modo=SUMATRA</text>
+          <text x="524" y="280" font-size="16" font-weight="600">gera o PDF do DANFE e imprime</text>
+          <text x="524" y="310" class="t-dado tx-mudo" font-size="13">SumatraPDF.exe ou PrintCupon.exe</text></g>
+        <g class="surge" style="animation-delay:5.8s"><rect x="500" y="390" width="420" height="108" rx="14" class="f-suave"/>
+          <text x="524" y="432" font-size="19" font-weight="700">F10 › Impressora › Imprimir Teste</text>
+          <text x="524" y="462" class="tx-mudo" font-size="15">confere modelo, porta e colunas na hora</text></g>
+      </svg>
+
+      <!-- 9 · TEF: três modos -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="12000" role="img" aria-label="Seção TEF do ini com os três modos: http pela ScopeAPI, arquivo pelo Tef Dial e clisitef pela dll da Fiserv">
+        <g class="surge" style="animation-delay:.3s"><rect x="290" y="40" width="380" height="84" rx="14" class="f-painel s-rota" stroke-width="2.5"/>
+          <text x="480" y="76" text-anchor="middle" class="t-dado" font-size="18"><tspan class="f-rota">[TEF]</tspan>  habilitado=1</text>
+          <text x="480" y="106" text-anchor="middle" class="t-dado tx-mudo" font-size="15">modo = http | arquivo | clisitef</text></g>
+        <path class="sem-fill s-rota traco" style="--len:370;--dur:1s;animation-delay:1s" stroke-width="2.5" d="M480 124 V150 H180 V180"/>
+        <path class="sem-fill s-rota traco" style="--len:60;--dur:.6s;animation-delay:1s" stroke-width="2.5" d="M480 124 V180"/>
+        <path class="sem-fill s-rota traco" style="--len:340;--dur:1s;animation-delay:1s" stroke-width="2.5" d="M480 150 H780 V180"/>
+        <g class="surge" style="animation-delay:1.6s"><rect x="40" y="180" width="280" height="226" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="62" y="222" class="t-disp f-rota" font-size="28">http</text>
+          <text x="62" y="250" font-size="15" font-weight="600">ScopeAPI</text>
+          <g class="t-dado" font-size="12"><text class="t-dado" x="62" y="290">url=http://127.0.0.1:8000/api</text>
+            <text x="62" y="316" class="tx-mudo t-dado">sucesso: HTTP 200 ou 201</text>
+            <text x="62" y="342" class="tx-mudo t-dado">valor enviado em centavos</text></g></g>
+        <g class="surge" style="animation-delay:3.2s"><rect x="340" y="180" width="280" height="226" rx="14" class="f-painel s-linha" stroke-width="2"/>
+          <text x="362" y="222" class="t-disp f-rota" font-size="28">arquivo</text>
+          <text x="362" y="250" font-size="15" font-weight="600">Tef Dial · troca de arquivos</text>
+          <g class="t-dado" font-size="12"><text class="t-dado" x="362" y="290">pasta_req=C:\Tef_Dial\Req\</text>
+            <text class="t-dado" x="362" y="316">pasta_resp=C:\Tef_Dial\Resp\</text>
+            <text x="362" y="342" class="tx-mudo t-dado">timeout=120</text></g></g>
+        <g class="surge" style="animation-delay:4.8s"><rect x="640" y="180" width="280" height="226" rx="14" class="f-painel s-rota" stroke-width="2"/>
+          <text x="662" y="222" class="t-disp f-rota" font-size="28">clisitef</text>
+          <text x="662" y="250" font-size="15" font-weight="600">CliSiTef · SiTef / Fiserv</text>
+          <g class="t-dado" font-size="12"><text class="t-dado" x="662" y="290">sitef_dll=</text>
+            <text class="t-dado" x="662" y="310">C:\Apolo\clisitef\CliSiTef32I.dll</text>
+            <text class="t-dado" x="662" y="342">sitef_ip · sitef_loja</text>
+            <text class="t-dado" x="662" y="366">sitef_terminal</text></g></g>
+        <g class="surge" style="animation-delay:6.4s">
+          <text x="40" y="454" class="t-dado tx-mudo" font-size="14">debug=1 → C:\Apolo\logs\tef-AAAAMMDD.log</text>
+          <rect x="560" y="428" width="360" height="52" rx="12" class="f-suave"/>
+          <text x="740" y="460" text-anchor="middle" font-size="17" font-weight="700">F10 › TEF · menu administrativo</text></g>
+      </svg>
+
+      <!-- 10 · teste de aceite -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="10500" role="img" aria-label="Checklist do teste de aceite e o cupom da NFC-e autorizada com a venda enviada ao servidor">
+        <rect x="40" y="52" width="520" height="440" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <text x="64" y="98" class="t-disp" font-size="28">Teste de aceite</text>
+        <g font-size="18">
+          <rect x="64" y="137" width="24" height="24" rx="6" class="f-painel2 s-linha"/><text x="104" y="156">Login do operador</text>
+          <rect x="64" y="191" width="24" height="24" rx="6" class="f-painel2 s-linha"/><text x="104" y="210">Sincronizou produtos e preços</text>
+          <rect x="64" y="245" width="24" height="24" rx="6" class="f-painel2 s-linha"/><text x="104" y="264">Abriu o caixa com o troco</text>
+          <rect x="64" y="299" width="24" height="24" rx="6" class="f-painel2 s-linha"/><text x="104" y="318">Venda de teste (cartão, se tiver TEF)</text>
+          <rect x="64" y="353" width="24" height="24" rx="6" class="f-painel2 s-linha"/><text x="104" y="372">NFC-e autorizada e impressa</text>
+          <rect x="64" y="407" width="24" height="24" rx="6" class="f-painel2 s-linha"/><text x="104" y="426">Venda subiu para o servidor</text>
+        </g>
+        <g fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="s-ok">
+          <path class="cai" style="animation-delay:.8s" d="M69 149 l6 6 l12 -13"/>
+          <path class="cai" style="animation-delay:1.5s" d="M69 203 l6 6 l12 -13"/>
+          <path class="cai" style="animation-delay:2.2s" d="M69 257 l6 6 l12 -13"/>
+          <path class="cai" style="animation-delay:2.9s" d="M69 311 l6 6 l12 -13"/>
+          <path class="cai" style="animation-delay:3.6s" d="M69 365 l6 6 l12 -13"/>
+          <path class="cai" style="animation-delay:4.3s" d="M69 419 l6 6 l12 -13"/>
+        </g>
+        <!-- cupom -->
+        <g class="sobe" style="animation-delay:3.4s">
+          <rect x="600" y="52" width="320" height="290" rx="10" class="f-painel s-linha" stroke-width="2"/>
+          <text x="760" y="92" text-anchor="middle" class="t-disp" font-size="20">DANFE NFC-e</text>
+          <text x="760" y="118" text-anchor="middle" class="t-dado tx-mudo" font-size="13">nº 000123 · série 3 · caixa 3</text>
+          <path d="M624 136 H896" class="s-linha" stroke-width="1.5" stroke-dasharray="5 5"/>
+          <text x="624" y="166" font-size="14">VENDA TESTE</text><text x="896" y="166" text-anchor="end" class="t-dado" font-size="14">0,01</text>
+          <text x="624" y="196" class="t-disp" font-size="20">Total</text><text x="896" y="196" text-anchor="end" class="t-disp" font-size="20">R$ 0,01</text>
+          <path d="M624 214 H896" class="s-linha" stroke-width="1.5" stroke-dasharray="5 5"/>
+          <rect x="680" y="230" width="160" height="32" rx="16" class="f-ok"/><text x="760" y="252" text-anchor="middle" class="tx-claro" font-size="15" font-weight="700">Autorizada</text>
+          <text x="760" y="292" text-anchor="middle" class="t-dado tx-mudo" font-size="12">protocolo 135260001234567</text>
+          <text x="760" y="316" text-anchor="middle" class="tx-mudo" font-size="12">ambiente conforme msfilial</text>
+        </g>
+        <g class="surge" style="animation-delay:4.6s"><rect x="600" y="370" width="320" height="122" rx="12" class="f-painel s-ok" stroke-width="2"/>
+          <text x="624" y="408" font-size="17" font-weight="600">Upload: venda enviada</text>
+          <text x="624" y="436" class="tx-mudo" font-size="14">confira na retaguarda</text>
+          <text x="624" y="462" class="t-dado tx-mudo" font-size="13">msapolo_venda · caixa 3</text></g>
+      </svg>
+
+      <!-- 11 · quando dá errado -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="12000" role="img" aria-label="Tabela de sintomas, causas e ações, e o comando do diagnóstico do cliente">
+        <rect x="40" y="40" width="880" height="316" rx="14" class="f-painel s-linha" stroke-width="2"/>
+        <rect x="52" y="52" width="856" height="36" rx="8" class="f-painel2"/>
+        <g font-size="14" font-weight="600" class="tx-mudo"><text class="tx-mudo" x="66" y="76">SINTOMA</text><text class="tx-mudo" x="330" y="76">CAUSA PROVÁVEL</text><text class="tx-mudo" x="626" y="76">O QUE FAZER</text></g>
+        <g font-size="15">
+          <g class="surge" style="animation-delay:.5s"><text x="66" y="124" font-weight="600">Tela branca</text>
+            <text x="330" y="116">WebView2 ausente ou antigo;</text><text x="330" y="138" class="tx-mudo">pasta web sem escrita</text>
+            <text x="626" y="124" class="t-dado f-rota" font-size="13">diagnostico-cliente.ps1</text></g>
+          <path d="M52 154 H908" class="s-linha" stroke-width="1"/>
+          <g class="surge" style="animation-delay:1.6s"><text x="66" y="190" font-weight="600">Falha ao abrir o banco local</text>
+            <text x="330" y="182">outra cópia do ApoloWeb ou</text><text x="330" y="204" class="tx-mudo">visualizador SQLite aberto</text>
+            <text x="626" y="182">fechar a outra cópia</text><text x="626" y="204" class="tx-mudo">e abrir de novo</text></g>
+          <path d="M52 220 H908" class="s-linha" stroke-width="1"/>
+          <g class="surge" style="animation-delay:2.7s"><text x="66" y="256" font-weight="600">Caixa não cadastrado</text>
+            <text x="330" y="248">serial do C: ausente em</text><text x="330" y="270" class="t-dado tx-mudo" font-size="13">msapolo_caixa</text>
+            <text x="626" y="248">cadastrar o serial</text><text x="626" y="270" class="tx-mudo">mostrado na mensagem</text></g>
+          <path d="M52 286 H908" class="s-linha" stroke-width="1"/>
+          <g class="surge" style="animation-delay:3.8s"><text x="66" y="322" font-weight="600">Não sincroniza / TEF falha</text>
+            <text x="330" y="314">rede, servidor ou</text><text x="330" y="336" class="tx-mudo">gerenciador do TEF</text>
+            <text x="626" y="314">ler o log do dia</text><text x="626" y="336" class="t-dado tx-mudo" font-size="13">C:\Apolo\logs\</text></g>
+        </g>
+        <g class="surge" style="animation-delay:5s"><rect x="40" y="380" width="880" height="112" rx="14" class="f-painel s-rota" stroke-width="2"/>
+          <text x="64" y="422" class="t-dado f-rota" font-size="15">PS C:\Apolo&gt;</text>
+          <text x="186" y="422" class="t-dado" font-size="15">powershell -ExecutionPolicy Bypass -File diagnostico-cliente.ps1</text>
+          <text x="64" y="462" class="t-dado tx-mudo" font-size="14">logs: sync-AAAAMMDD.log · tef-AAAAMMDD.log (um por dia)</text></g>
+      </svg>
+
+      <!-- 12 · atualizar = trocar o exe -->
+      <svg class="cena" viewBox="0 0 960 540" data-dur="11000" role="img" aria-label="Quatro passos para atualizar: fechar, renomear o exe atual para bak, copiar o novo exe e abrir; e o help de instalação">
+        <text x="40" y="82" class="t-disp" font-size="34">Atualizar = trocar o exe</text>
+        <g class="surge" style="animation-delay:.5s"><circle cx="62" cy="142" r="20" class="f-rota"/><text x="62" y="150" text-anchor="middle" class="tx-escuro t-disp" font-size="22">1</text>
+          <text x="98" y="138" font-size="18" font-weight="600">Feche o ApoloWeb no caixa</text><text x="98" y="162" class="tx-mudo" font-size="14">exe em uso não pode ser trocado</text></g>
+        <g class="surge" style="animation-delay:1.4s"><circle cx="62" cy="228" r="20" class="f-rota"/><text x="62" y="236" text-anchor="middle" class="tx-escuro t-disp" font-size="22">2</text>
+          <text x="98" y="224" font-size="18" font-weight="600">Renomeie o exe atual</text><text x="98" y="248" class="t-dado tx-mudo" font-size="13">ApoloWeb.exe.bak-20261020</text></g>
+        <g class="surge" style="animation-delay:2.3s"><circle cx="62" cy="314" r="20" class="f-rota"/><text x="62" y="322" text-anchor="middle" class="tx-escuro t-disp" font-size="22">3</text>
+          <text x="98" y="310" font-size="18" font-weight="600">Copie o novo ApoloWeb.exe</text><text x="98" y="334" class="t-dado tx-mudo" font-size="13">do pacote ApoloWeb(26_10_0_5).zip</text></g>
+        <g class="surge" style="animation-delay:3.2s"><circle cx="62" cy="400" r="20" class="f-ok"/><text x="62" y="408" text-anchor="middle" class="tx-claro t-disp" font-size="22">4</text>
+          <text x="98" y="396" font-size="18" font-weight="600">Abra o caixa</text><text x="98" y="420" class="tx-mudo" font-size="14">a pasta web é regravada a partir do exe</text></g>
+        <!-- arquivos -->
+        <g class="surge" style="animation-delay:1.4s">
+          <path d="M560 110 h70 l22 22 v90 h-92 z" class="f-painel s-linha" stroke-width="2"/><path d="M630 110 v22 h22" class="sem-fill s-linha" stroke-width="2"/>
+          <text x="606" y="186" text-anchor="middle" class="t-dado tx-mudo" font-size="14">.bak</text>
+          <text x="606" y="252" text-anchor="middle" class="t-dado tx-mudo" font-size="13">versão anterior</text></g>
+        <path class="sem-fill s-rota traco" style="--len:140;--dur:.9s;animation-delay:2.3s" stroke-width="3" stroke-linecap="round" d="M680 166 H800 m-10 -8 l10 8 l-10 8"/>
+        <g class="cai" style="animation-delay:2.9s">
+          <path d="M820 110 h70 l22 22 v90 h-92 z" class="f-rota"/><path d="M890 110 v22 h22" class="sem-fill" stroke="#1a1206" stroke-opacity=".35" stroke-width="2"/>
+          <text x="866" y="186" text-anchor="middle" class="t-dado tx-escuro" font-size="14" font-weight="600">.exe</text>
+          <text x="866" y="252" text-anchor="middle" class="t-dado" font-size="13">26.10.0.5</text></g>
+        <g class="surge" style="animation-delay:4.4s"><rect x="540" y="330" width="380" height="122" rx="14" class="f-suave"/>
+          <text x="564" y="372" class="t-disp" font-size="24">Help de instalação</text>
+          <text x="564" y="402" font-size="16">o passo a passo completo,</text>
+          <text x="564" y="426" font-size="16">com os comandos</text></g>
+      </svg>
+
+    </div>
+
+    <div class="legenda" aria-live="polite">
+      <div>
+        <span class="num" id="lgNum">Cena 1 de 12</span>
+        <h2 id="lgTit"></h2>
+        <p id="lgTxt"></p>
+      </div>
+      <span class="rot" id="lgRot"></span>
+    </div>
+    <div class="controles">
+      <button class="btn" id="bAnt" type="button" aria-label="Cena anterior">◀</button>
+      <button class="btn prim" id="bPlay" type="button" aria-label="Pausar">❚❚ Pausar</button>
+      <button class="btn" id="bProx" type="button" aria-label="Próxima cena">▶</button>
+      <div class="trilho" id="trilho" role="tablist" aria-label="Cenas"></div>
+      <span class="tempo" id="tempo">0:00</span>
+    </div>
+  </section>
+
+  <aside id="coluna" aria-hidden="true">
+    <div class="marca">Colosso<b>Instalação do ApoloWeb</b></div>
+    <ol id="indice"></ol>
+    <div id="avatarCard"></div>
+  </aside>
+
+  <h3 class="sec">Roteiro</h3>
+  <div class="roteiro" id="roteiro"></div>
+  <p class="rodape">Serial de disco, IPs, usuários e números das cenas são ilustrativos. Material de uso interno do suporte. Use as setas do teclado para navegar e a barra de espaço para pausar. O texto de cada cena serve de locução para gravar o vídeo.</p>
+</div>
+
+<script id="temas-colosso-js">
+/* ---- temas.js (cópia) ---- */
+/* ===========================================================================
+   temas.js — seletor de temas COMPARTILHADO das rotinas web Colosso.
+
+   Origem dos temas: ROT8010 (BI). Este módulo é idêntico em todas as rotinas
+   geradas pela skill colosso-delphi-webview; a escolha persiste na chave
+   localStorage 'colosso.tema'. Como as rotinas compartilham a mesma pasta de
+   dados do WebView2 ('ColossoWebView'), o tema escolhido em uma rotina vale
+   para todas.
+
+   Uso: inclua <select id="selTema"></select> na topbar, carregue este script
+   antes do app.js e pronto — ele se auto-inicializa no DOMContentLoaded.
+   API (opcional): window.TEMAS_COLOSSO = { TEMAS, temaAuto, aplicar, iniciar }
+   Evento: 'temamudou' em document (detail: {id, efetivo}) para quem precisar
+   re-renderizar gráficos com a nova paleta (--chart-palette).
+   =========================================================================== */
+(function () {
+  const CHAVE = 'colosso.tema';
+
+  const TEMAS = [
+    { id: 'auto',        nome: '🗓️ Automático (época do ano)' },
+    { id: 'escuro',      nome: '🌙 Escuro' },
+    { id: 'claro',       nome: '☀️ Claro' },
+    { id: 'floresta',    nome: '🌲 Floresta' },
+    { id: 'florido',     nome: '🌸 Florido' },
+    { id: 'oceano',      nome: '🌊 Oceano' },
+    { id: 'cafe',        nome: '☕ Café' },
+    { id: 'natal',       nome: '🎄 Natal' },
+    { id: 'ano-novo',    nome: '🎆 Ano Novo' },
+    { id: 'carnaval',    nome: '🎭 Carnaval' },
+    { id: 'pascoa',      nome: '🐰 Páscoa' },
+    { id: 'maes',        nome: '💐 Dia das Mães' },
+    { id: 'pais',        nome: '👔 Dia dos Pais' },
+    { id: 'junina',      nome: '🎪 Festa Junina' },
+    { id: 'criancas',    nome: '🧸 Dia das Crianças' },
+    { id: 'halloween',   nome: '🎃 Halloween' },
+    { id: 'blackfriday', nome: '🛍️ Black Friday' }
+  ];
+
+  // Tema sugerido pela época do ano (datas aproximadas p/ festas móveis).
+  function temaAuto() {
+    const hoje = new Date();
+    const m = hoje.getMonth() + 1, d = hoje.getDate();
+    if (m === 12 && d <= 26) return 'natal';
+    if ((m === 12 && d > 26) || (m === 1 && d <= 7)) return 'ano-novo';
+    if (m === 2 || (m === 3 && d <= 7)) return 'carnaval';
+    if ((m === 3 && d >= 15) || (m === 4 && d <= 20)) return 'pascoa';
+    if (m === 5 && d <= 14) return 'maes';
+    if (m === 6) return 'junina';
+    if (m === 8 && d <= 14) return 'pais';
+    if (m === 10 && d <= 12) return 'criancas';
+    if (m === 10 && d >= 20) return 'halloween';
+    if (m === 11 && d >= 20) return 'blackfriday';
+    return 'escuro';
+  }
+
+  function aplicar(id, silencioso) {
+    const efetivo = (id === 'auto') ? temaAuto() : id;
+    document.documentElement.setAttribute('data-tema', efetivo);
+    try { localStorage.setItem(CHAVE, id); } catch (e) { /* file:// pode bloquear */ }
+    document.dispatchEvent(new CustomEvent('temamudou', { detail: { id, efetivo, silencioso: !!silencioso } }));
+  }
+
+  function iniciar(seletor) {
+    const sel = document.querySelector(seletor || '#selTema');
+    if (!sel) return;
+    sel.innerHTML = TEMAS.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+    let salvo = 'auto';
+    try { salvo = localStorage.getItem(CHAVE) || 'auto'; } catch (e) { }
+    if (!TEMAS.some(t => t.id === salvo)) salvo = 'auto';
+    sel.value = salvo;
+    aplicar(salvo, true);
+    sel.addEventListener('change', () => aplicar(sel.value));
+  }
+
+  window.TEMAS_COLOSSO = { TEMAS, temaAuto, aplicar, iniciar };
+  document.addEventListener('DOMContentLoaded', () => iniciar('#selTema'));
+})();
+
+/* Tema pela URL (?tema=claro) ou, na gravação, o escuro fixo. Roda depois do iniciar() do temas.js. */
+document.addEventListener('DOMContentLoaded', () => {
+  const m = /[?&]tema=([\w-]+)/.exec(location.search);
+  const video = /[?&](video|avatar)=1/.test(location.search);
+  const id = m ? m[1] : (video ? 'escuro' : null);
+  if (!id || !window.TEMAS_COLOSSO.TEMAS.some(t => t.id === id)) return;
+  window.TEMAS_COLOSSO.aplicar(id, true);
+  const sel = document.getElementById('selTema'); if (sel) sel.value = id;
+});
+</script>
+<script>
+(function(){
+  const CENAS=[   // t = título · r = rótulo (rotina/tela) · x = legenda; a ORDEM e a QUANTIDADE batem com as cenas do palco
+    {t:"Instalar um caixa ApoloWeb",r:"visão geral",x:"Cinco etapas: preparar o Windows, copiar os arquivos, ligar ao banco, configurar os periféricos e testar."},
+    {t:"Pré-requisitos da máquina",r:"Windows · WebView2",x:"Windows 10 ou 11, WebView2 Runtime 89 ou superior e rede até o Oracle. O ApoloWeb é 32 bits."},
+    {t:"A pasta C:\\Apolo",r:"C:\\Apolo",x:"Executável, WebView2Loader x86, OpenSSL 1.1, libxml e Schemas. O resto o app cria no primeiro boot."},
+    {t:"O primeiro boot",r:"ApoloWeb.exe",x:"Extrai a web, cria o SQLite, lê o serial do C: e o ini e conecta ao Oracle em modo Direct, sem client."},
+    {t:"apoloweb.ini: a conexão",r:"apoloweb.ini · [oracle]",x:"Servidor, porta, usuário e senha. Sem Oracle e sem cache, abre a janela de configuração, que pede a senha de administrador."},
+    {t:"Cadastrar o caixa",r:"msapolo_caixa",x:"O caixa é reconhecido pelo serial do volume C:. Cadastre o serial com filial, número do caixa e série da NFC-e."},
+    {t:"Os dados fiscais vêm da filial",r:"msfilial",x:"Certificado, CSC, ambiente e logo vêm do Oracle. O PFX vai para C:\\Apolo e tudo fica em cache para abrir offline."},
+    {t:"Impressora do cupom",r:"apoloweb.ini · [impressao]",x:"ESCPOS imprime direto na térmica (modelo, porta, colunas). Confira em F10 › Impressora › Imprimir Teste."},
+    {t:"TEF",r:"apoloweb.ini · [TEF]",x:"Três modos: http (ScopeAPI), arquivo (Tef Dial) e clisitef (dll da Fiserv). Confira em F10 › TEF."},
+    {t:"Teste de aceite",r:"F5 · F10",x:"Login, sincronização, abertura, venda de teste, NFC-e autorizada e a venda no servidor."},
+    {t:"Quando dá errado",r:"logs · diagnóstico",x:"Tela branca, banco local preso, caixa não cadastrado e onde ficam os logs do dia."},
+    {t:"Atualizar é trocar o executável",r:"ApoloWeb.exe",x:"Feche, guarde o exe atual como .bak, copie o novo e abra: a tela web vem dentro do exe."}
+  ];
+  const $=s=>document.querySelector(s);
+  const cenas=[...document.querySelectorAll('#palco svg.cena')];
+  const durs=cenas.map(c=>Number(c.dataset.dur)||9000);
+  const total=durs.reduce((a,b)=>a+b,0);
+  let atual=0, tocando=true, inicio=performance.now(), decorrido=0, raf=0;
+  const reduz=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // trilho e roteiro
+  $('#trilho').innerHTML=CENAS.map((c,i)=>`<button type="button" role="tab" aria-label="Cena ${i+1}: ${c.t}" data-i="${i}"><i></i></button>`).join('');
+  $('#roteiro').innerHTML=CENAS.map((c,i)=>`<button type="button" class="cap" data-i="${i}"><b>${String(i+1).padStart(2,'0')}</b><strong>${c.t}</strong><span>${c.x}</span></button>`).join('');
+  document.querySelectorAll('[data-i]').forEach(b=>b.addEventListener('click',()=>{ ir(+b.dataset.i); if(b.classList.contains('cap')) document.querySelector('.player').scrollIntoView({behavior:reduz?'auto':'smooth',block:'start'}); }));
+
+  function reiniciarAnimacoes(svg){ // recomeça as animações CSS da cena
+    svg.classList.remove('ativa'); void svg.getBoundingClientRect(); svg.classList.add('ativa');
+  }
+  function ir(i){
+    atual=(i+cenas.length)%cenas.length;
+    cenas.forEach((c,k)=>{ if(k===atual) reiniciarAnimacoes(c); else c.classList.remove('ativa'); });
+    const c=CENAS[atual];
+    $('#lgNum').textContent='Cena '+(atual+1)+' de '+cenas.length;
+    $('#lgTit').textContent=c.t; $('#lgTxt').textContent=c.x; $('#lgRot').textContent=c.r;
+    document.querySelectorAll('#trilho button').forEach((b,k)=>{ b.classList.toggle('feito',k<atual); b.setAttribute('aria-selected',k===atual); b.querySelector('i').style.width=k<atual?'100%':'0'; });
+    document.querySelectorAll('.cap').forEach((b,k)=>b.classList.toggle('atual',k===atual));
+    document.querySelectorAll('#indice li').forEach((li,k)=>{ li.classList.toggle('feito',k<atual); li.classList.toggle('atual',k===atual); });
+    decorrido=0; inicio=performance.now();
+  }
+  function fmt(ms){ const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+  function tick(t){
+    if(tocando){
+      decorrido=t-inicio;
+      const d=durs[atual];
+      const barra=document.querySelectorAll('#trilho button i')[atual];
+      if(barra) barra.style.width=Math.min(100,decorrido/d*100)+'%';
+      const antes=durs.slice(0,atual).reduce((a,b)=>a+b,0);
+      $('#tempo').textContent=fmt(antes+Math.min(decorrido,d))+' / '+fmt(total);
+      if(decorrido>=d) ir(atual+1);
+    }
+    raf=requestAnimationFrame(tick);
+  }
+  function alternar(){
+    tocando=!tocando;
+    if(tocando){ inicio=performance.now()-decorrido; }
+    document.querySelectorAll('#palco svg.cena').forEach(c=>c.style.setProperty('--estado',''));
+    document.querySelectorAll('#palco svg.cena.ativa *').forEach(e=>{ e.style.animationPlayState=tocando?'running':'paused'; });
+    $('#bPlay').innerHTML=tocando?'❚❚ Pausar':'▶ Tocar';
+    $('#bPlay').setAttribute('aria-label',tocando?'Pausar':'Tocar');
+  }
+  $('#bPlay').addEventListener('click',alternar);
+  $('#bAnt').addEventListener('click',()=>ir(atual-1));
+  $('#bProx').addEventListener('click',()=>ir(atual+1));
+  document.addEventListener('keydown',e=>{
+    if(e.target.closest('input,textarea'))return;
+    if(e.key==='ArrowRight'){e.preventDefault();ir(atual+1);}
+    else if(e.key==='ArrowLeft'){e.preventDefault();ir(atual-1);}
+    else if(e.key===' '){e.preventDefault();alternar();}
+  });
+  $('#indice').innerHTML=CENAS.map(c=>'<li>'+c.t+'</li>').join('');
+  if(/[?&]video=1/.test(location.search)) document.body.classList.add('video');          // gravação 1920×1080
+  if(/[?&]avatar=1/.test(location.search)) document.body.classList.add('video','com-avatar');
+  window.__ir=ir; window.__durs=durs; ir(0);
+  if(!document.body.classList.contains('video')) raf=requestAnimationFrame(tick);
+})();
+</script>
+<div id="vbar"></div></body></html>

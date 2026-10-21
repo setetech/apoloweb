@@ -6,7 +6,7 @@ sistema: "Colosso ERP"
 tipo: "manual do usuário (aba Ajuda / F1)"
 idioma: "pt-BR"
 fonte: "ApoloWeb/web/index.html (aba Ajuda)"
-gerado_em: "2026-10-16"
+gerado_em: "2026-10-21"
 ---
 
 <!-- Gerado pela skill colosso-ajuda-rag a partir da aba Ajuda da ApoloWeb. Não edite à mão: altere a ajuda da rotina e gere de novo. -->
