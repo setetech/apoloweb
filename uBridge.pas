@@ -3811,7 +3811,7 @@ begin
       begin
         // Cliente encontrado no cadastro (mscliente)
         LCodCli := LQuery.FieldByName('codcli').AsInteger;
-        LNomeCliente := LQuery.FieldByName('nome').AsString;
+        LNomeCliente := Copy(LQuery.FieldByName('nome').AsString, 1, TAM_NOME_CLIENTE);
 
         // Atualizar cupom com dados do cliente cadastrado
         FSQLite.ExecutarSQL(
@@ -3866,6 +3866,7 @@ var
   LCodCli: Integer;
   LQuery: TUniQuery;
   LDados: TJSONObject;
+  LNomeCliente: string;
 begin
   if FCupomAtualId = 0 then
     Exit(CriarRespostaErro('Inicie uma venda antes de vincular o cliente'));
@@ -3888,23 +3889,25 @@ begin
       if LQuery.IsEmpty then
         Exit(CriarRespostaErro('Cliente nao encontrado'));
 
+      LNomeCliente := Copy(LQuery.FieldByName('nome').AsString, 1, TAM_NOME_CLIENTE);
+
       // Atualizar cupom com dados do cliente
       FSQLite.ExecutarSQL(
         'UPDATE cupons SET codcli = :p0, cpf_cnpj = :p1, descnomecliente = :p2 WHERE id = :p3',
         [LCodCli,
          LQuery.FieldByName('cpf_cnpj').AsString,
-         LQuery.FieldByName('nome').AsString,
+         LNomeCliente,
          FCupomAtualId]
       );
 
       LDados := TJSONObject.Create;
       LDados.AddPair('codcli', TJSONNumber.Create(LCodCli));
       LDados.AddPair('cpfCnpj', LQuery.FieldByName('cpf_cnpj').AsString);
-      LDados.AddPair('nome', LQuery.FieldByName('nome').AsString);
+      LDados.AddPair('nome', LNomeCliente);
       LDados.AddPair('cidade', LQuery.FieldByName('cidade').AsString);
       LDados.AddPair('uf', LQuery.FieldByName('uf').AsString);
 
-      Result := CriarRespostaSucesso('Cliente vinculado: ' + LQuery.FieldByName('nome').AsString, LDados);
+      Result := CriarRespostaSucesso('Cliente vinculado: ' + LNomeCliente, LDados);
     finally
       LQuery.Free;
     end;

@@ -19,6 +19,13 @@ const
   // Banco SQLite
   ARQUIVO_SQLITE = 'C:\Apolo\ApoloWeb.db';
 
+  // Nome do cliente no cupom. msapolo_venda.descnomecliente e' VARCHAR2(60)
+  // na retaguarda e o xNome da NFC-e para no mesmo tamanho (layout da SEFAZ),
+  // mas mscliente.nome tem 80: o que vem do cadastro precisa ser cortado antes
+  // de ir para o cupom. Sem isto o upload morre com ORA-12899 e a venda fica
+  // presa no caixa, retentando para sempre (27/10, REALLOUCAS caixa 11).
+  TAM_NOME_CLIENTE = 60;
+
   // Configuracao XML/INI
   ARQ_CONFIG_XML = 'C:\Apolo\Apolo.xml';
   ARQ_CONFIG_INI = 'C:\Apolo\Apolo.ini';

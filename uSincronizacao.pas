@@ -1655,7 +1655,10 @@ begin
           LInsert.ParamByName('codsupervisor').AsInteger := LCupom.FieldByName('codsupervisor').AsInteger;
           LInsert.ParamByName('codcli').AsInteger := LCupom.FieldByName('codcli').AsInteger;
           LInsert.ParamByName('cpf_cnpj').AsString := LCupom.FieldByName('cpf_cnpj').AsString;
-          LInsert.ParamByName('descnomecliente').AsString := LCupom.FieldByName('descnomecliente').AsString;
+          // Corte tambem aqui: cupom gravado por uma versao anterior pode
+          // trazer o nome inteiro do cadastro e derrubar o INSERT inteiro
+          LInsert.ParamByName('descnomecliente').AsString :=
+            Copy(LCupom.FieldByName('descnomecliente').AsString, 1, TAM_NOME_CLIENTE);
           LInsert.ParamByName('qtdeitens').AsInteger := LCupom.FieldByName('qtdeitens').AsInteger;
           LInsert.ParamByName('valorvenda').AsFloat := LCupom.FieldByName('valorvenda').AsFloat;
           LInsert.ParamByName('valordesc').AsFloat := LCupom.FieldByName('valordesc').AsFloat;

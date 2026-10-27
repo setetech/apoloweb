@@ -1492,7 +1492,9 @@ begin
       begin
         Dest.CNPJCPF := LCPF;
         if LQuery.FieldByName('descnomecliente').AsString <> '' then
-          Dest.xNome := LQuery.FieldByName('descnomecliente').AsString;
+          // xNome da NFC-e para em 60 no layout da SEFAZ
+          Dest.xNome := Copy(LQuery.FieldByName('descnomecliente').AsString,
+                             1, TAM_NOME_CLIENTE);
         Dest.indIEDest := inNaoContribuinte;
       end;
     end;
