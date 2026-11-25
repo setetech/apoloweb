@@ -13,7 +13,12 @@
 -- GUARDA IMPORTANTE: so processa venda com chavenfe preenchida. A MSNF tira
 -- serie e numnota da chave; sem chave sai nota com numnota 0. Venda sem NFCe
 -- autorizada fica esperando de proposito, e aparece no relatorio de pendencia
--- do fim deste arquivo.
+-- do fim deste arquivo. EXCECAO: orcamento (codoper='O', desde 22/10/2026)
+-- entra sem chave e gera MSNF com POSICAO='O' (ver MSAPOLO_GERAR_NF).
+--
+-- JA INSTALADO ANTES? Para so atualizar a varredura, rode apenas o bloco
+-- "CREATE OR REPLACE PROCEDURE MSAPOLO_PROCESSAR_PENDENTES" (secao 2) - o
+-- CREATE TABLE da secao 1 e o CREATE_JOB da secao 3 dariam erro de "ja existe".
 --
 -- COMO RODAR: por sqlplus, que entende o "/" como fim de bloco PL/SQL:
 --
@@ -65,6 +70,40 @@ BEGIN
   p_processadas := 0;
   p_recusadas   := 0;
 
+  -- Registra UMA vez cada venda que esta esperando o PDV completar
+  INSERT INTO msapolo_gerar_nf_log (numtrans_pdv, numtrans_erp, retorno)
+    SELECT v.numtrans, NULL, 'Venda incompleta: enviada com o cupom aberto no caixa ' ||
+           '(sem hora de fim ou sem pagamento). Aguardando o PDV completar.'
+      FROM msapolo_venda v
+     WHERE v.numtrans_erp IS NULL
+       AND NVL(v.codoper, 'V') = 'V'
+       AND NVL(TRIM(v.chavenfe), 'x') <> 'x'
+       AND (TRIM(v.dthrfimvenda) IS NULL
+            OR NOT EXISTS (SELECT 1 FROM msapolo_venda_pagto p WHERE p.numtrans = v.numtrans))
+       AND NOT EXISTS (SELECT 1 FROM msapolo_gerar_nf_log l
+                        WHERE l.numtrans_pdv = v.numtrans
+                          AND l.retorno LIKE 'Venda incompleta:%');
+
+  -- Venda cancelada no PDV (evento 110111 gravado ha mais de 1 hora) com a nota
+  -- ainda ativa no ERP. Quem cancela e' o ApoloWeb de 25/11/2026 ou mais novo;
+  -- aqui so fica UM aviso por venda do que ele nao fez (caixa na versao antiga,
+  -- titulo baixado no acerto): cancelar pela ROT7006, aba Inserir notas.
+  INSERT INTO msapolo_gerar_nf_log (numtrans_pdv, numtrans_erp, retorno)
+    SELECT v.numtrans, v.numtrans_erp,
+           'Cancelada no PDV com a nota ativa no ERP: cancelar pela ROT7006 (Inserir notas)'
+      FROM msapolo_venda v, msnf n
+     WHERE v.codoper = 'C'
+       AND n.numtrans = v.numtrans_erp
+       AND n.dtcancel IS NULL
+       AND NVL(n.posicao, 'x') <> 'C'
+       AND EXISTS (SELECT 1 FROM msdoceletronico d
+                    WHERE d.chavenfe = v.chavenfe AND d.tipo = 'C'
+                      AND d.data < SYSDATE - 1/24)
+       AND NOT EXISTS (SELECT 1 FROM msapolo_gerar_nf_log l
+                        WHERE l.numtrans_pdv = v.numtrans
+                          AND l.retorno LIKE 'Cancelada no PDV com a nota ativa%');
+  COMMIT;
+
   FOR r IN (
     -- ROWNUM em cima de uma subconsulta ordenada (e nao FETCH FIRST) para
     -- funcionar tambem em Oracle anterior ao 12c
@@ -72,8 +111,16 @@ BEGIN
       SELECT numtrans
         FROM msapolo_venda
        WHERE numtrans_erp IS NULL
-         AND NVL(codoper, 'V') = 'V'
-         AND NVL(TRIM(chavenfe), 'x') <> 'x'   -- guarda: sem chave nao entra
+         AND (   (NVL(codoper, 'V') = 'V'
+                  AND NVL(TRIM(chavenfe), 'x') <> 'x')   -- guarda: venda sem chave nao entra
+              -- Orcamento (aba F7 do PDV) nunca tem chave: vira MSNF posicao 'O'
+              OR codoper = 'O')
+         -- cupom enviado ainda aberto no caixa espera o PDV completar (a
+         -- MSAPOLO_GERAR_NF recusaria a cada rodada e encheria o log)
+         AND TRIM(dthrfimvenda) IS NOT NULL
+         AND (NVL(codoper, 'V') <> 'V'
+              OR EXISTS (SELECT 1 FROM msapolo_venda_pagto p
+                          WHERE p.numtrans = msapolo_venda.numtrans))
        ORDER BY numtrans
     ) WHERE ROWNUM <= p_limite
   ) LOOP
@@ -140,7 +187,8 @@ END;
 --
 -- Venda parada e por que (as sem chave sao as que a NFCe nao foi autorizada):
 --   SELECT numtrans, numcaixa, numcupom, datamovto, valorvenda,
---          CASE WHEN NVL(TRIM(chavenfe),'x') = 'x' THEN 'sem NFCe autorizada'
+--          CASE WHEN codoper = 'O' THEN 'orcamento aguardando o job'
+--               WHEN NVL(TRIM(chavenfe),'x') = 'x' THEN 'sem NFCe autorizada'
 --               ELSE 'aguardando o job' END motivo
 --     FROM msapolo_venda WHERE numtrans_erp IS NULL ORDER BY numtrans;
 --

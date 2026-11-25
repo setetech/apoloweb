@@ -10,6 +10,11 @@
 --     posicao de pedido (nasce 'F') nem numeracao a atribuir depois
 --   * serie e numnota saem da chave da NFC-e, nao do msseriedoc: a nota fiscal
 --     ja existe e foi autorizada pela SEFAZ com aquela numeracao
+--   * o ICMS dos itens (VBC_NFE/VICMS_NFE/PERCICM) e' COPIADO do XML autorizado
+--     (MSDOCELETRONICO pela chave; sem XML, msapolo_venda_item.vbc_nfe/vicms_nfe,
+--     que o PDV grava do mesmo XML) e nunca recalculado - ver 4.5. Exige as
+--     colunas vbc_nfe/vicms_nfe na msapolo_venda_item (ALTER no passo 1 do
+--     docs/update-vbc-vicms-nfe.sql). Desde 21/10/2026.
 --
 -- Decisoes tomadas com o cliente em 2026-08-21:
 --   codoper .... 'S' (Venda de Mercadoria; financ='R', status='A', coddoc=2)
@@ -20,6 +25,11 @@
 --                codcob de msapolo_venda_pagto ja e' o do ERP - ver secao 2
 --   codcli ..... msfilial.codconsumidor da filial da venda, quando o cupom
 --                vem com codcli 0 (consumidor nao identificado)
+--
+-- ORCAMENTO (22/10/2026): venda do PDV com codoper='O' (aba F7 Orcamento) vira
+-- MSNF com POSICAO='O', sem chave, numnota 0, serie/especie nulas (nao e'
+-- documento fiscal) e SEM financeiro (MSLANC/MSPARCELAS/MSNFCOB). Os itens vao
+-- para a MSMOV normalmente. O job (msapolo_job_gerar_nf.sql) pega 'O' sem chave.
 --
 -- NAO movimenta estoque. A 3185 tambem nao baixa MSEST no faturamento (so
 -- mexe em qtreserv quando o pedido esta em L/M); a baixa fica para o processo
@@ -144,7 +154,36 @@ CREATE OR REPLACE PROCEDURE MSAPOLO_GERAR_NF (
   v_totparc     NUMBER;
   v_numparcela  NUMBER := 0;
   v_soma_pagto  NUMBER;
+
+  -- Parcela em dinheiro SEM o troco ('S') ou com o recebido do cliente ('N',
+  -- como sempre foi). So ligar 'S' depois de TODAS as maquinas estarem com a
+  -- ROT6030 de 25/11/2026 ou mais nova: a anterior abate o troco da parcela no
+  -- acerto sem olhar se ele ja saiu, e o dinheiro ficaria a menos duas vezes.
+  c_troco_liquido CONSTANT VARCHAR2(1) := 'N';
+  TYPE t_tab_pag IS TABLE OF msapolo_venda_pagto%ROWTYPE INDEX BY PLS_INTEGER;
+  v_pag         t_tab_pag;
+  pag           msapolo_venda_pagto%ROWTYPE;
+  v_troco       NUMBER;
+  v_abate       NUMBER;
   v_chave       VARCHAR2(60);
+  v_rid_xml     ROWID;
+  v_xml         CLOB;
+  v_xml_rep     CLOB;
+  v_orcamento   BOOLEAN := FALSE;   -- codoper 'O': orcamento do PDV
+
+  -- ICMS dos itens: o do XML autorizado da NFC-e (ver LerDetXml e a 4.5)
+  TYPE t_det IS RECORD (
+    cprod  VARCHAR2(60),
+    vbc    NUMBER,
+    picms  NUMBER,
+    vicms  NUMBER
+  );
+  TYPE t_tab_det IS TABLE OF t_det INDEX BY PLS_INTEGER;
+  v_det         t_tab_det;   -- det do XML, indexado pelo nItem
+  v_cst         VARCHAR2(3);
+  v_vbc         NUMBER;
+  v_vicms       NUMBER;
+  v_picms       NUMBER;
 
   e_recusa EXCEPTION;
 
@@ -177,13 +216,73 @@ CREATE OR REPLACE PROCEDURE MSAPOLO_GERAR_NF (
   EXCEPTION WHEN OTHERS THEN RETURN p_default;
   END;
 
+
+  -- Numero do XML: sempre com ponto decimal, independente do NLS da sessao
+  FUNCTION NumeroXml(p_txt VARCHAR2) RETURN NUMBER IS
+  BEGIN
+    RETURN NVL(TO_NUMBER(TRIM(p_txt), '9999999999999D9999',
+                         'NLS_NUMERIC_CHARACTERS=''.,'''), 0);
+  EXCEPTION WHEN OTHERS THEN RETURN 0;
+  END;
+
+  -- det/imposto/ICMS do XML autorizado (MSDOCELETRONICO, ligado pela chave;
+  -- o numtrans de la e' outro). nItem conta so os itens nao cancelados, na
+  -- ordem de numseqitem - a mesma numeracao do msmov.item da 4.5.
+  -- Sem XML (ainda nao subiu) ou XML ilegivel: v_det vazio, e o item usa o
+  -- vBC/vICMS que o PDV gravou do mesmo XML em msapolo_venda_item.
+  -- O CLOB e' lido na propria XMLTABLE pelo ROWID: no 11g, CLOB que passa
+  -- por subconsulta pode chegar nulo e XMLTYPE(NULL) da ORA-06502.
+  PROCEDURE LerDetXml(p_chave VARCHAR2) IS
+    v_rid ROWID;
+  BEGIN
+    v_det.DELETE;
+    IF LENGTH(NVL(p_chave, '')) <> 44 THEN RETURN; END IF;
+
+    BEGIN
+      SELECT rid INTO v_rid FROM (
+        SELECT d.ROWID rid
+          FROM msdoceletronico d
+         WHERE d.chavenfe = p_chave
+           AND d.tipo = 'P'
+           AND d.xml_nfe IS NOT NULL
+         ORDER BY d.numtrans)
+       WHERE ROWNUM = 1;
+    EXCEPTION WHEN NO_DATA_FOUND THEN RETURN;
+    END;
+
+    FOR x IN (SELECT x.nitem, TRIM(x.cprod) cprod, x.vbc, x.picms, x.vicms
+                FROM msdoceletronico d,
+                     XMLTABLE(XMLNAMESPACES(DEFAULT 'http://www.portalfiscal.inf.br/nfe'),
+                              '//det'
+                              -- SUBSTR a partir do primeiro '<' descarta BOM
+                              -- e lixo antes do XML, que o XMLTYPE recusa
+                              PASSING XMLTYPE(SUBSTR(d.xml_nfe, INSTR(d.xml_nfe, '<')))
+                              COLUMNS nitem NUMBER       PATH '@nItem',
+                                      cprod VARCHAR2(60) PATH 'prod/cProd',
+                                      vbc   VARCHAR2(30) PATH 'imposto/ICMS/*/vBC',
+                                      picms VARCHAR2(30) PATH 'imposto/ICMS/*/pICMS',
+                                      vicms VARCHAR2(30) PATH 'imposto/ICMS/*/vICMS') x
+               WHERE d.ROWID = v_rid) LOOP
+      v_det(x.nitem).cprod := x.cprod;
+      v_det(x.nitem).vbc   := NumeroXml(x.vbc);
+      v_det(x.nitem).picms := NumeroXml(x.picms);
+      v_det(x.nitem).vicms := NumeroXml(x.vicms);
+    END LOOP;
+  EXCEPTION WHEN OTHERS THEN
+    v_det.DELETE;
+  END;
+
 BEGIN
   p_numtrans_erp := NULL;
   p_retorno      := 'sucesso';
 
   -- ---- 4.1 venda de origem -------------------------------------------------
   BEGIN
-    SELECT * INTO venda FROM msapolo_venda WHERE numtrans = p_numtrans_pdv;
+    -- Trava a venda ate o commit: o PDV trava a mesma linha para cancelar e
+    -- para subir o XML. Sem isso a venda cancelada no meio da geracao virava
+    -- nota ativa, e o XML que subia no meio ficava fora dela.
+    SELECT * INTO venda FROM msapolo_venda WHERE numtrans = p_numtrans_pdv
+       FOR UPDATE WAIT 30;
   EXCEPTION
     WHEN NO_DATA_FOUND THEN
       p_retorno := 'Venda ' || p_numtrans_pdv || ' nao encontrada em msapolo_venda';
@@ -199,6 +298,21 @@ BEGIN
 
   IF NVL(venda.codoper, 'V') = 'C' THEN
     p_retorno := 'Venda cancelada no PDV - nada a gerar';
+    RAISE e_recusa;
+  END IF;
+
+  -- Orcamento: nao foi para a SEFAZ, nao tem chave nem pagamento
+  v_orcamento := NVL(venda.codoper, 'V') = 'O';
+
+  -- Venda que subiu com o cupom ainda ABERTO no caixa (PDV ate 24/11/2026):
+  -- sem hora de fim, ou venda sem pagamento. Os itens sao so os do momento do
+  -- envio; gerar agora daria nota sem o resto dos itens e sem financeiro. Fica
+  -- esperando: o ApoloWeb novo completa a venda e ela entra sozinha.
+  SELECT COUNT(*) INTO v_qtd FROM msapolo_venda_pagto WHERE numtrans = p_numtrans_pdv;
+  IF TRIM(venda.dthrfimvenda) IS NULL
+     OR (NVL(venda.codoper, 'V') = 'V' AND v_qtd = 0) THEN
+    p_retorno := 'Venda incompleta: enviada com o cupom aberto no caixa ' ||
+                 '(sem hora de fim ou sem pagamento). Aguardando o PDV completar.';
     RAISE e_recusa;
   END IF;
 
@@ -255,9 +369,20 @@ BEGIN
   nf.faturamento   := NVL(tipodoc.faturamento, 'S');
   nf.bonificado    := NVL(tipodoc.bonificado, 'N');
   nf.tpimp         := tipodoc.tpimp;
+  -- Conta financeira: a do tipo de documento, como o ERP faz. Vai tambem para
+  -- o MSLANC (4.6); onde MSLANC.IDCODCONTA e' NOT NULL, sem ela dava ORA-01400.
+  nf.idcodconta    := tipodoc.idcodconta;
 
   -- Numeracao. A serie e' a do caixa, em msapolo_caixa.serie_nfce; o numero
   -- vem da chave da NFC-e autorizada.
+  -- Orcamento nao e' documento fiscal: sem chave, numnota 0, sem serie/especie.
+  IF v_orcamento THEN
+    v_chave    := NULL;
+    nf.posicao := 'O';
+    nf.numnota := 0;
+    nf.serie   := NULL;
+    nf.especie := NULL;
+  ELSE
   nf.numnota := NumNotaDaChave(v_chave);
 
   SELECT TO_CHAR(MAX(serie_nfce)) INTO nf.serie
@@ -296,6 +421,7 @@ BEGIN
                  '). Acertar msapolo_caixa.serie_nfce antes de subir.';
     RAISE e_recusa;
   END IF;
+  END IF;   -- v_orcamento
 
   nf.chavenfe      := v_chave;
   nf.numvolumes    := 1;
@@ -317,7 +443,8 @@ BEGIN
   nf.dtultalter    := CURRENT_TIMESTAMP;
   nf.codfunclanc   := v_matricula;
   nf.codrotinalanc := p_codrotina;
-  nf.obs           := 'PDV caixa ' || venda.numcaixa ||
+  nf.obs           := CASE WHEN v_orcamento THEN 'ORCAMENTO ' END ||
+                      'PDV caixa ' || venda.numcaixa ||
                       ' cupom ' || venda.numcupom;
 
   -- Cobranca da NF: a do pagamento de maior valor do cupom
@@ -333,6 +460,9 @@ BEGIN
   SELECT NVL(MAX(numped), 0) + 1 INTO nf.numped FROM msnf;
 
   INSERT INTO msnf VALUES nf;
+
+  -- det do XML autorizado, para o ICMS dos itens (4.5)
+  LerDetXml(v_chave);
 
   -- ---- 4.5 itens (MSMOV) ---------------------------------------------------
   FOR reg IN (SELECT * FROM msapolo_venda_item
@@ -357,7 +487,48 @@ BEGIN
     mov.codprod      := reg.codprod;
     mov.codbarra     := reg.codbarra;
     mov.unidade      := NVL(reg.unidade, produto.unidade);
+    mov.codfiscal    := reg.cfop;
+    mov.sittribut_icms := reg.icms_cst;
+    mov.aliqicms     := reg.aliqicms;
     mov.qt           := NVL(reg.qt, 0);
+
+    -- ICMS proprio do item = o do XML autorizado, copiado e nunca recalculado.
+    -- Recalcular como qt x unitario arredondado divergia do XML (15 x 0,15 =
+    -- 2,25 contra 11,25 x 20,5% = 2,31) e, com qtunit, multiplicava o valor da
+    -- caixa pelas unidades (ICMS de 1.620.320,00 numa base de 197,60).
+    -- Ordem: det do XML (nItem = v_item, conferido pelo cProd); sem XML, o que o
+    -- PDV gravou do mesmo XML em msapolo_venda_item; CST sem debito proprio
+    -- (30/40/41/50/60), que no XML nao tem vBC/vICMS, fica zerado. Sem nenhuma
+    -- fonte fica NULL: a conferencia da ROT7003 acusa e o
+    -- docs/update-vbc-vicms-nfe.sql completa quando o XML subir.
+    v_cst   := SUBSTR(LPAD(TRIM(reg.icms_cst), 3, '0'), -2);
+    v_vbc   := NULL;
+    v_vicms := NULL;
+    v_picms := reg.aliqicms;
+    IF v_det.EXISTS(v_item) AND v_det(v_item).cprod = TO_CHAR(reg.codprod) THEN
+      v_vbc   := v_det(v_item).vbc;
+      v_vicms := v_det(v_item).vicms;
+      IF v_vbc > 0 THEN
+        v_picms := v_det(v_item).picms;
+      END IF;
+    ELSIF v_cst IN ('30', '40', '41', '50', '60') THEN
+      v_vbc   := 0;
+      v_vicms := 0;
+    ELSIF reg.vbc_nfe IS NOT NULL THEN
+      v_vbc   := reg.vbc_nfe;
+      v_vicms := NVL(reg.vicms_nfe, 0);
+    END IF;
+    IF v_cst IN ('30', '40', '41', '50', '60') AND NVL(v_vbc, 0) = 0 THEN
+      v_picms := 0;
+    END IF;
+
+    mov.percicm   := v_picms;
+    mov.vbc_nfe   := ROUND(v_vbc, 2);
+    mov.vicms_nfe := ROUND(v_vicms, 2);
+    -- BASEICMS/VLICMS sao unitarios no ERP (quem le multiplica pelo qt e so usa
+    -- quando VBC_NFE e' nulo); ficam derivados do total, nunca o contrario
+    mov.baseicms  := mov.vbc_nfe   / NULLIF(mov.qt, 0);
+    mov.vlicms    := mov.vicms_nfe / NULLIF(mov.qt, 0);
     mov.qtnf         := mov.qt;
     mov.fator_qt     := NVL(NULLIF(produto.fator_qt, 0), 1);
     mov.punit        := NVL(reg.punit, 0);
@@ -403,6 +574,10 @@ BEGIN
     EXCEPTION WHEN NO_DATA_FOUND THEN
       mov.qtest_ant := 0; mov.qtestger_ant := 0;
     END;
+    -- Nao baixou aqui = saldo igual: o cancelamento (uCancelamentoNF) devolve
+    -- estoque so do item em que o saldo mudou
+    mov.qtest    := mov.qtest_ant;
+    mov.qtestger := mov.qtestger_ant;
 
     INSERT INTO msmov VALUES mov;
   END LOOP;
@@ -414,10 +589,37 @@ BEGIN
 
   -- ---- 4.6 financeiro (MSLANC / MSPARCELAS / MSNFCOB) ----------------------
   -- Gerado SEMPRE, e EM ABERTO: a baixa fica para a conferencia de caixa.
-  SELECT COUNT(*), NVL(SUM(valor), 0) INTO v_totparc, v_soma_pagto
-    FROM msapolo_venda_pagto WHERE numtrans = p_numtrans_pdv;
+  -- Orcamento nao gera financeiro (nao ha o que receber ainda).
+  SELECT * BULK COLLECT INTO v_pag
+    FROM msapolo_venda_pagto WHERE numtrans = p_numtrans_pdv
+   ORDER BY numparcela, codcob;
 
-  IF v_totparc > 0 THEN
+  v_soma_pagto := 0;
+  FOR i IN 1 .. v_pag.COUNT LOOP
+    v_soma_pagto := v_soma_pagto + NVL(v_pag(i).valor, 0);
+  END LOOP;
+
+  -- O pagto do PDV e' o que o cliente entregou (nota de 69,40 paga com 100,00
+  -- sobe D = 100,00 e valortroco = 30,60). Abate so do dinheiro, e so o que
+  -- passa do total da nota. Cartao/PIX nunca: e' o valor que a operadora paga.
+  v_troco := 0;
+  IF c_troco_liquido = 'S' THEN
+    v_troco := LEAST(NVL(venda.valortroco, 0), GREATEST(v_soma_pagto - nf.vltotal, 0));
+  END IF;
+  FOR i IN 1 .. v_pag.COUNT LOOP
+    IF v_troco > 0 AND v_pag(i).codcob = 'D' THEN
+      v_abate := LEAST(v_troco, NVL(v_pag(i).valor, 0));
+      v_pag(i).valor := NVL(v_pag(i).valor, 0) - v_abate;
+      v_troco := v_troco - v_abate;
+      -- dinheiro devolvido inteiro no troco: nao vira titulo de zero
+      IF v_pag(i).valor = 0 THEN
+        v_pag.DELETE(i);
+      END IF;
+    END IF;
+  END LOOP;
+  v_totparc := v_pag.COUNT;
+
+  IF v_totparc > 0 AND NOT v_orcamento THEN
     lanc.idlanc         := SEQ_PROX_ID_LANC.NEXTVAL;
     lanc.numtrans       := nf.numtrans;
     lanc.numnota        := nf.numnota;
@@ -439,9 +641,9 @@ BEGIN
 
     INSERT INTO mslanc VALUES lanc;
 
-    FOR pag IN (SELECT * FROM msapolo_venda_pagto
-                 WHERE numtrans = p_numtrans_pdv
-                 ORDER BY numparcela, codcob) LOOP
+    FOR i IN v_pag.FIRST .. v_pag.LAST LOOP
+      CONTINUE WHEN NOT v_pag.EXISTS(i);
+      pag := v_pag(i);
 
       v_numparcela := v_numparcela + 1;
       parcela := parcela_vazia;
@@ -477,10 +679,29 @@ BEGIN
   -- O PDV grava msdoceletronico com um numtrans proprio, que nao aponta para
   -- nota nenhuma. Aqui o XML passa a pertencer a NF gerada.
   IF v_chave IS NOT NULL AND LENGTH(v_chave) = 44 THEN
-    UPDATE msdoceletronico
-       SET numtrans = nf.numtrans
-     WHERE chavenfe = v_chave
-       AND numtrans <> nf.numtrans;
+    -- UMA linha so. O PDV ja gravou o mesmo XML duas vezes (dois envios no
+    -- mesmo segundo) e levar as duas para o mesmo NUMTRANS dava ORA-00001 na
+    -- PK_MSDOCELETRONICO a cada rodada, para sempre. O repetido identico e'
+    -- apagado; um diferente fica onde esta. Evento de cancelamento (tipo 'C')
+    -- e XML que ja pertence a uma nota nao sao tocados.
+    v_rid_xml := NULL;
+    FOR d IN (SELECT x.ROWID rid
+                FROM msdoceletronico x
+               WHERE x.chavenfe = v_chave
+                 AND x.tipo = 'P'
+                 AND NOT EXISTS (SELECT 1 FROM msnf n WHERE n.numtrans = x.numtrans)
+               ORDER BY CASE WHEN x.xml_nfe IS NULL THEN 1 ELSE 0 END, x.numtrans) LOOP
+      IF v_rid_xml IS NULL THEN
+        v_rid_xml := d.rid;
+        UPDATE msdoceletronico SET numtrans = nf.numtrans WHERE ROWID = d.rid;
+        SELECT xml_nfe INTO v_xml FROM msdoceletronico WHERE ROWID = d.rid;
+      ELSE
+        SELECT xml_nfe INTO v_xml_rep FROM msdoceletronico WHERE ROWID = d.rid;
+        IF DBMS_LOB.COMPARE(v_xml, v_xml_rep) = 0 THEN
+          DELETE FROM msdoceletronico WHERE ROWID = d.rid;
+        END IF;
+      END IF;
+    END LOOP;
   END IF;
 
   -- ---- 4.8 marcar a venda como processada ---------------------------------
@@ -517,7 +738,7 @@ SHOW ERRORS PROCEDURE MSAPOLO_GERAR_NF;
 -- Processar o que ainda nao subiu:
 -- BEGIN
 --   FOR r IN (SELECT numtrans FROM msapolo_venda
---              WHERE numtrans_erp IS NULL AND codoper = 'V' ORDER BY numtrans) LOOP
+--              WHERE numtrans_erp IS NULL AND codoper IN ('V', 'O') ORDER BY numtrans) LOOP
 --     DECLARE v_n NUMBER; v_r VARCHAR2(4000);
 --     BEGIN
 --       MSAPOLO_GERAR_NF(r.numtrans, 8002, NULL, v_n, v_r);

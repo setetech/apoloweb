@@ -27,7 +27,7 @@ CREATE TABLE msapolo_venda (
   codfilial                   VARCHAR2(2),
   numcaixa                    NUMBER(5),
   numcupom                    NUMBER(10),
-  codoper                     VARCHAR2(1),   -- 'V' venda, 'C' cancelada
+  codoper                     VARCHAR2(1),   -- 'V' venda, 'C' cancelada, 'O' orcamento
   datamovto                   VARCHAR2(19),
   dthriniciovenda             VARCHAR2(19),
   dthrfimvenda                VARCHAR2(19),
