@@ -342,6 +342,42 @@
 .pay-panel { display: none; }
 .pay-panel.active { display: block; }
 
+/* Aba F7 Orcamento: sem campos, so o aviso de que nao e' venda */
+.pay-tab-orcamento { border-style: dashed; }
+.pay-tab-orcamento.active { background: var(--accent-warning); color: #1e1e2e; border-color: var(--accent-warning); }
+.orcamento-box {
+  border: 1px dashed var(--accent-warning);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.orcamento-box p { margin: 6px 0; }
+.orcamento-titulo { font-size: 1.1rem; font-weight: 700; color: var(--accent-warning); }
+.orcamento-validade { color: var(--text-primary); font-size: 1.05rem; }
+.orcamento-aviso { color: var(--accent-danger, #ff7675); font-weight: 600; }
+.orcamento-dica { color: var(--text-muted); font-size: 0.85rem; }
+
+/* Busca de cliente da aba F7: lista sob o campo, escolhida com setas/Enter */
+.orc-cliente-box { position: relative; }
+.orc-cliente-dica { color: var(--text-muted); font-weight: 400; font-size: 0.8rem; }
+.orc-sugestoes {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 20;
+  max-height: 260px; overflow-y: auto; margin-top: 2px;
+  background: var(--bg-secondary); border: 1px solid var(--border-focus);
+  border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.orc-sugestao {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border-color);
+}
+.orc-sugestao:last-child { border-bottom: none; }
+.orc-sugestao:hover, .orc-sugestao.selected { background: var(--bg-active); }
+.orc-sugestao .cod { color: var(--text-muted); font-family: var(--font-mono); min-width: 56px; }
+.orc-sugestao .nome { color: var(--text-primary); font-weight: 600; flex: 1; }
+.orc-sugestao .doc, .orc-sugestao .cid { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
+.orc-sugestao-vazio { padding: 8px 12px; color: var(--text-muted); font-size: 0.85rem; }
+
 .pay-grid-2col {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -625,6 +661,30 @@
 .cfg-status-erro {
   color: var(--accent-danger);
   border-color: var(--accent-danger);
+}
+
+/* Barra de download da aba Atualizacao */
+.atu-progresso {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.atu-barra {
+  height: 100%;
+  width: 0;
+  background: var(--accent-primary);
+  transition: width 0.2s ease;
+}
+/* Servidor sem Content-Length: a barra corre sem porcentagem */
+.atu-indeterminado .atu-barra {
+  width: 30%;
+  animation: atu-correr 1.2s linear infinite;
+}
+@keyframes atu-correr {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(340%); }
 }
 
 /* Blocos dentro de uma aba de configuracao

@@ -325,6 +325,9 @@ begin
     LJson.AddPair('tefHabilitado', TJSONBool.Create(FBridge.TEFHabilitado));
     LJson.AddPair('tefPixQrTela', TJSONBool.Create(FBridge.TEFPixQrNaTela));
 
+    // Orcamento: [orcamento] validade_dias do apoloweb.ini
+    LJson.AddPair('orcamentoValidadeDias', TJSONNumber.Create(FBridge.OrcamentoValidadeDias));
+
     // Dados da venda em andamento (recuperacao apos queda)
     LJson.AddPair('cupomAtualId', TJSONNumber.Create(FBridge.CupomAtualId));
     if FBridge.CupomAtualId > 0 then
@@ -900,28 +903,14 @@ begin
 
   TThread.CreateAnonymousThread(
     procedure
-    var
-      LConn: TUniConnection;
     begin
       try
-        LConn := TUniConnection.Create(nil);
-        try
-          LConn.ConnectString := LConnStr;
-          LConn.LoginPrompt := False;
-          LConn.Connect;
-          try
-            if AForcar or LSincronizador.PrecisaSincronizar(LConn) then
-            begin
-              // F5/carga geral = recarga full de produtos; senao incremental
-              LSincronizador.DownloadCompleto(LConn, AForcar);
-              LSincronizador.AtualizarDataSincCaixa(LConn);
-            end;
-          finally
-            LConn.Disconnect;
-          end;
-        finally
-          LConn.Free;
-        end;
+        // F5/carga geral = recarga full de produtos sem consultar
+        // PrecisaSincronizar; abertura/login = incremental se precisar
+        if AForcar then
+          LSincronizador.ExecutarSincronizacao(LConnStr, 'carga geral F5', True, False)
+        else
+          LSincronizador.ExecutarSincronizacao(LConnStr, 'abertura', False, True);
       except
         // Falha na sincronizacao nao eh fatal, mas precisa ficar visivel no log
         on E: Exception do
@@ -963,27 +952,9 @@ begin
 
   TThread.CreateAnonymousThread(
     procedure
-    var
-      LConn: TUniConnection;
     begin
       try
-        LConn := TUniConnection.Create(nil);
-        try
-          LConn.ConnectString := LConnStr;
-          LConn.LoginPrompt := False;
-          LConn.Connect;
-          try
-            if LSincronizador.PrecisaSincronizar(LConn) then
-            begin
-              LSincronizador.DownloadCompleto(LConn);
-              LSincronizador.AtualizarDataSincCaixa(LConn);
-            end;
-          finally
-            LConn.Disconnect;
-          end;
-        finally
-          LConn.Free;
-        end;
+        LSincronizador.ExecutarSincronizacao(LConnStr, 'automatica', False, True);
       except
         // Falha na sync automatica nao eh fatal, mas fica no log
         on E: Exception do

@@ -15,6 +15,9 @@ uses
   uNFCeWeb in 'uNFCeWeb.pas',
   uMonitorConexao in 'uMonitorConexao.pas',
   uSincronizacao in 'uSincronizacao.pas',
+  uDocEletronicoNF in 'uDocEletronicoNF.pas',
+  uCancelamentoNF in '..\Comun\uCancelamentoNF.pas',
+  uInstanciaUnica in 'uInstanciaUnica.pas',
   uFrmConfigConexao in 'uFrmConfigConexao.pas' {FrmConfigConexao},
   Winapi.WebView2 in 'Winapi.WebView2.pas',
   uTEF in 'uTEF.pas',
@@ -22,7 +25,8 @@ uses
   uSyncLog in 'uSyncLog.pas',
   uTEFLog in 'uTEFLog.pas',
   uTEFCliSiTef in 'uTEFCliSiTef.pas',
-  uUploadWorker in 'uUploadWorker.pas';
+  uUploadWorker in 'uUploadWorker.pas',
+  uAtualizacao in 'uAtualizacao.pas';
 
 {$R *.res}
 // Assets web (index.html + css\*.css + js\*.js) embutidos no .exe.
@@ -30,11 +34,17 @@ uses
 {$R 'ApoloWebAssets.res'}
 
 begin
+  // Dois ApoloWeb abertos na mesma maquina usam o mesmo SQLite e enviam o
+  // mesmo cupom ao mesmo tempo (XML da NFC-e gravado duas vezes na retaguarda)
+  if not GarantirInstanciaUnica then
+    Exit;
   Application.Initialize;
   SetDllDirectory( 'c:\colosso\prod\dlls' );
   // Recria os assets web em PASTA_WEB a partir dos recursos embutidos,
   // ANTES de criar o FrmMain (que navega para https://apolo.local/index.html).
   ExtrairWebAssets;
+  // ApoloWeb.exe.old que a aba Atualizacao deixou ao trocar a versao
+  LimparAtualizacaoAnterior;
   Application.MainFormOnTaskbar := True;
   TStyleManager.TrySetStyle('Tablet Dark');
   Application.Title := 'ApoloWeb - Frente de Caixa';

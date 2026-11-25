@@ -1294,6 +1294,18 @@ begin
       [LProtEvento, LJust, LXmlEvento, 'NFCe cancelada: ' + LJust, ACupomId]
     );
 
+    // A nota pode ja existir no ERP: entra na fila do cancelamento de la. A
+    // SEFAZ ja homologou, entao falha aqui nao pode virar erro do cancelamento
+    try
+      FSQLite.ExecutarSQL(
+        'INSERT OR REPLACE INTO cancelamento_erp (cupom_id, situacao, tentativas) ' +
+        'VALUES (:p0, 0, 0)', [ACupomId]);
+    except
+      on E: Exception do
+        SyncLog('NFCe: cancelamento cupom=%d nao entrou na fila do ERP: %s',
+          [ACupomId, E.Message]);
+    end;
+
     Result.Sucesso := True;
     Result.Mensagem := Format('NFCe cancelada (%d - %s). Protocolo do evento: %s',
       [LcStat, LxMotivo, LProtEvento]);
@@ -1330,7 +1342,7 @@ end;
 { Imprime a nota em NotasFiscais[0] conforme [impressao] do apoloweb.ini:
     modo=ESCPOS  -> ACBrNFe.DANFE ja e o TACBrNFeDANFeESCPOS (uDmApoloWeb);
                     Imprimir manda ESC/POS direto na termica, sem PDF.
-    modo=SUMATRA -> gera o PDF (uma vez) e delega ao app externo. }
+    modo=SUMATRA -> gera o PDF e delega ao app externo. }
 procedure TNFCeWebManager.ImprimirNotaCarregada;
 var
   ArqPDF: string;
@@ -1358,14 +1370,15 @@ begin
     SyncLog('DANFCe: caminho PDF/Sumatra (modo=%s)', [DmApoloWeb.ModoImpressao]);
     ArqPDF := PASTA_NFCE + 'pdf\' +
       SomenteNumeroInteiro(FACBrNFe.NotasFiscais.Items[0].NFe.infNFe.ID) + '-nfe.pdf';
+    // Sempre regera: um PDF antigo pode ter outra largura_bobina (o de 80mm
+    // saia cortado na termica) e a reimpressao repetiria o defeito
+    if FileExists(ArqPDF) then
+      System.SysUtils.DeleteFile(ArqPDF);
+    FACBrNFe.NotasFiscais.Items[0].ImprimirPDF;
+    // ImprimirPDF nao retorna o caminho gerado; conferir se saiu onde o
+    // fluxo espera (PathPDF + <chave>-nfe.pdf)
     if not FileExists(ArqPDF) then
-    begin
-      FACBrNFe.NotasFiscais.Items[0].ImprimirPDF;
-      // ImprimirPDF nao retorna o caminho gerado; conferir se saiu onde o
-      // fluxo espera (PathPDF + <chave>-nfe.pdf)
-      if not FileExists(ArqPDF) then
-        SyncLog('NFCe: ImprimirPDF nao gerou o arquivo esperado: ' + ArqPDF);
-    end;
+      SyncLog('NFCe: ImprimirPDF nao gerou o arquivo esperado: ' + ArqPDF);
     ImprimirPDFExterno(ArqPDF);
   end;
 end;

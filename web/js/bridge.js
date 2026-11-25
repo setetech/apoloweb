@@ -24,7 +24,8 @@ const Bridge = {
     reimprimirCupom: true, reimprimirComprovanteTEF: true,
     cancelarVenda: true, administracaoTEF: true, estornarTEF: true,
     iniciarPagamentoTEF: true, testarTEF: true, testarImpressao: true,
-    efetuarSangria: true, efetuarSuprimento: true
+    efetuarSangria: true, efetuarSuprimento: true,
+    salvarOrcamento: true   // sobe para o Oracle e imprime, como o finalizarVenda
   },
 
   _timeoutPara(action) {
@@ -145,6 +146,11 @@ const Bridge = {
 
   async finalizarVenda() {
     return this.call('finalizarVenda', {});
+  },
+
+  // Fecha a venda em andamento como orcamento (sem NFC-e, sem pagamento)
+  async salvarOrcamento(nomeCliente) {
+    return this.call('salvarOrcamento', { nomeCliente: nomeCliente || '' });
   },
 
   async listarMeiosPagamento() {
@@ -393,6 +399,21 @@ const Bridge = {
 
   async testarImpressao() {
     return this.call('testarImpressao', {});
+  },
+
+  // Atualizacao da versao do caixa (aba Atualizacao)
+  async obterInfoAtualizacao() {
+    return this.call('obterInfoAtualizacao', {});
+  },
+
+  // aut = { supMatricula, supSenha } quando o backend exigir autorizacao.
+  // Usa send: o "sem permissao" e' tratado pelo dialogo de autorizacao
+  async baixarAtualizacao(aut) {
+    return this.send('baixarAtualizacao', aut || {});
+  },
+
+  async instalarAtualizacao() {
+    return this.call('instalarAtualizacao', {});
   },
 
   // Fechar aplicacao (Alt+F4)

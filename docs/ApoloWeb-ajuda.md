@@ -6,7 +6,7 @@ sistema: "Colosso ERP"
 tipo: "manual do usuário (aba Ajuda / F1)"
 idioma: "pt-BR"
 fonte: "ApoloWeb/web/index.html (aba Ajuda)"
-gerado_em: "2026-10-21"
+gerado_em: "2026-11-24"
 ---
 
 <!-- Gerado pela skill colosso-ajuda-rag a partir da aba Ajuda da ApoloWeb. Não edite à mão: altere a ajuda da rotina e gere de novo. -->
@@ -99,6 +99,7 @@ Tecle `F4`. Escolha a forma de pagamento, informe o valor e registre com `Enter`
 | `F4` | PIX | Mostra o QR Code para o cliente pagar (quando o TEF está habilitado, o PIX vai pelo TEF). |
 | `F5` | Cobrança | Na aba, escolha o meio de pagamento, o plano e os vencimentos das parcelas. Fora da aba, a tecla finaliza a venda. |
 | `F6` | POS | Cartão passado numa maquininha que não é integrada ao PDV. |
+| `F7` | Orçamento | Salva a venda como orçamento: não emite NFC-e, não recebe pagamento e não entra no caixa. O comprovante sai como documento sem valor fiscal, com a validade (`[orcamento] validade_dias` do `apoloweb.ini`, padrão 7 dias). Com a aba aberta, `F5` ou `Enter` salva. |
 
 ### Atalhos do TEF
 
@@ -131,6 +132,7 @@ Ao finalizar, a NFC-e é gerada e impressa, e o caixa volta a ficar livre.
 | Logotipo | Imagem impressa no topo do DANFCe e mostrada no cabeçalho do PDV. Aqui também se liga o protetor de tela, que mostra o logotipo com o caixa parado. |
 | TEF | Configuração da integração com o pinpad, menu administrativo do gerenciador e as transações do dia, com **Estornar** e 2ª via do comprovante. |
 | Impressora | Impressora do cupom e o modo de impressão; **Imprimir Teste** confere a configuração. |
+| Atualização | Baixa a nova versão do ApoloWeb do link configurado em **[atualizacao] url** do apoloweb.ini e mostra qual versão chegou. **Instalar e Reiniciar** troca o executável e reabre o caixa. Exige a permissão 20 (Atualizar Versão do Caixa) e não pode ter venda aberta. |
 
 > **Atenção:** Não use o menu administrativo do TEF para vender nem para estornar: a transação feita lá não passa pelo caixa e não gera cupom. Para desfazer um cartão, use **Estornar** na linha da transação, na aba TEF.
 

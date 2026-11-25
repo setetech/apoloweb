@@ -237,6 +237,7 @@
           <button class="pay-tab" data-tab="pay-tef" style="display:none">F3 TEF</button>
           <button class="pay-tab" data-tab="pay-cobranca">F5 Cobranca</button>
           <button class="pay-tab" data-tab="pay-pos">F6 POS</button>
+          <button class="pay-tab pay-tab-orcamento" data-tab="pay-orcamento">F7 Or&ccedil;amento</button>
         </div>
         <p id="pay-hint-tef" class="pay-hint" style="display:none">Atalho: <b>F9</b> TEF Credito &middot; <b>F10</b> TEF Debito &middot; <b>F11</b> TEF PIX &mdash; ja com o valor restante</p>
 
@@ -348,6 +349,29 @@
               <div class="input-group"><label>NSU</label><input type="text" id="pay-pos-nsu"></div>
               <div class="input-group"><label>Autorizacao</label><input type="text" id="pay-pos-aut"></div>
               <div class="input-group"><label>Parcelas</label><input type="number" id="pay-pos-parcelas" value="1" min="1"></div>
+            </div>
+          </div>
+
+          <!-- Orcamento: fecha o cupom sem NFC-e e sem pagamento (codoper 'O').
+               Nao tem input: F5/Enter salvam (Payment.salvarOrcamento). -->
+          <div id="pay-orcamento" class="pay-panel">
+            <div class="orcamento-box">
+              <div class="orcamento-titulo">Salvar como or&ccedil;amento</div>
+              <p>N&atilde;o emite NFC-e e n&atilde;o recebe pagamento: o pedido &eacute; salvo como
+                 or&ccedil;amento e o comprovante sai com <b>DOCUMENTO SEM VALOR FISCAL</b>.</p>
+              <p class="orcamento-validade">V&aacute;lido por <b id="pay-orcamento-dias">7 dias</b>
+                 &mdash; at&eacute; <b id="pay-orcamento-ate">--/--/----</b></p>
+              <p id="pay-orcamento-cliente-ok" class="orcamento-cliente hidden">Cliente: <b id="pay-orcamento-cliente-nome"></b>
+                 <button type="button" class="btn btn-secondary btn-sm" id="btn-orcamento-trocar-cliente" style="margin-left:8px">Alterar</button></p>
+              <div id="pay-orcamento-cliente-box" class="input-group orc-cliente-box">
+                <label>Cliente <span class="req">*</span> &mdash; CPF/CNPJ, c&oacute;digo ou nome
+                  <span class="orc-cliente-dica">(&uarr;&darr; escolhe, Enter vincula &middot; Esc fecha a lista para usar s&oacute; o nome digitado)</span></label>
+                <input type="text" id="pay-orcamento-cliente" maxlength="60" autocomplete="off">
+                <div id="pay-orcamento-sugestoes" class="orc-sugestoes hidden"></div>
+              </div>
+              <p id="pay-orcamento-aviso" class="orcamento-aviso hidden">H&aacute; pagamento registrado.
+                 Remova-o da lista antes de salvar como or&ccedil;amento.</p>
+              <p class="orcamento-dica">Tecle <kbd>F5</kbd> ou <kbd>Enter</kbd> para salvar o or&ccedil;amento.</p>
             </div>
           </div>
         </div>
@@ -541,7 +565,15 @@
         <p id="dialog-message"></p>
         <div id="dialog-input-group" class="input-group hidden">
           <label id="dialog-input-label"></label>
-          <input type="text" id="dialog-input" class="input-currency">
+          <div class="dialog-input-row">
+            <input type="text" id="dialog-input" class="input-currency">
+            <!-- Alternador R$ / % (so' no desconto - Dialog.promptDesconto) -->
+            <div id="dialog-desc-tipo" class="desc-tipo hidden">
+              <button type="button" data-tipo="valor" tabindex="-1">R$</button>
+              <button type="button" data-tipo="percentual" tabindex="-1">%</button>
+            </div>
+          </div>
+          <div id="dialog-desc-preview" class="desc-preview hidden"></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -583,6 +615,7 @@
           <button class="pay-tab" data-tab="nfce-logo">Logotipo</button>
           <button class="pay-tab" data-tab="nfce-tef">TEF</button>
           <button class="pay-tab" data-tab="nfce-impressora">Impressora</button>
+          <button class="pay-tab" data-tab="nfce-atualizacao">Atualizacao</button>
         </div>
         <div id="nfce-pendentes" class="pay-panel active">
           <table class="data-table">
@@ -943,6 +976,36 @@
             </div>
           </div>
         </div>
+        <div id="nfce-atualizacao" class="pay-panel">
+          <div class="cfg-form">
+            <div class="input-group">
+              <label for="atu-versao-atual">Versao instalada</label>
+              <input type="text" id="atu-versao-atual" readonly>
+            </div>
+
+            <div class="input-group">
+              <label for="atu-url">Link da nova versao (.zip com o ApoloWeb.exe)</label>
+              <input type="text" id="atu-url" readonly>
+              <small class="logo-hint" id="atu-url-hint"></small>
+            </div>
+
+            <div class="atu-progresso hidden" id="atu-progresso">
+              <div class="atu-barra" id="atu-barra"></div>
+            </div>
+
+            <div class="cfg-status" id="atu-status"></div>
+
+            <p class="cfg-nota">
+              Exige a permissao <b>20 - Atualizar Versao do Caixa</b>. Ao instalar,
+              o caixa fecha e abre sozinho ja na versao nova.
+            </p>
+
+            <div class="btn-group">
+              <button class="btn btn-primary" id="btn-atu-baixar">Baixar Nova Versao</button>
+              <button class="btn btn-warning hidden" id="btn-atu-instalar">Instalar e Reiniciar</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1127,6 +1190,7 @@
                 <tr><td><kbd>F4</kbd></td><td>PIX</td><td>Mostra o QR Code para o cliente pagar (quando o TEF está habilitado, o PIX vai pelo TEF).</td></tr>
                 <tr><td><kbd>F5</kbd></td><td>Cobrança</td><td>Na aba, escolha o meio de pagamento, o plano e os vencimentos das parcelas. Fora da aba, a tecla finaliza a venda.</td></tr>
                 <tr><td><kbd>F6</kbd></td><td>POS</td><td>Cartão passado numa maquininha que não é integrada ao PDV.</td></tr>
+                <tr><td><kbd>F7</kbd></td><td>Orçamento</td><td>Salva a venda como orçamento: não emite NFC-e, não recebe pagamento e não entra no caixa. O comprovante sai como documento sem valor fiscal, com a validade (<code>[orcamento] validade_dias</code> do <code>apoloweb.ini</code>, padrão 7 dias). Com a aba aberta, <kbd>F5</kbd> ou <kbd>Enter</kbd> salva.</td></tr>
               </tbody>
             </table>
             <h3>Atalhos do TEF</h3>
@@ -1171,6 +1235,7 @@
                 <tr><td>Logotipo</td><td>Imagem impressa no topo do DANFCe e mostrada no cabeçalho do PDV. Aqui também se liga o protetor de tela, que mostra o logotipo com o caixa parado.</td></tr>
                 <tr><td>TEF</td><td>Configuração da integração com o pinpad, menu administrativo do gerenciador e as transações do dia, com <b>Estornar</b> e 2ª via do comprovante.</td></tr>
                 <tr><td>Impressora</td><td>Impressora do cupom e o modo de impressão; <b>Imprimir Teste</b> confere a configuração.</td></tr>
+                <tr><td>Atualização</td><td>Baixa a nova versão do ApoloWeb do link configurado em <b>[atualizacao] url</b> do apoloweb.ini e mostra qual versão chegou. <b>Instalar e Reiniciar</b> troca o executável e reabre o caixa. Exige a permissão 20 (Atualizar Versão do Caixa) e não pode ter venda aberta.</td></tr>
               </tbody>
             </table>
             <div class="aj-atencao">

@@ -37,6 +37,14 @@ const Payment = {
   _tefCancelando: false,   // dialogo/pedido de cancelamento em curso
   _tefInterativo: false,   // [TEF] modo=clisitef: menus/coletas na tela do PDV
 
+  // --- Orcamento (aba F7) ---
+  _orcamentoValidadeDias: 7,  // [orcamento] validade_dias, empurrado no init
+  _salvandoOrcamento: false,
+  _orcTrocarCliente: false,   // operador clicou "Alterar" no cliente da aba F7
+  _orcSugestoes: [],          // resultado da busca de cliente da aba F7
+  _orcSugIdx: -1,
+  _orcBuscaSeq: 0,            // descarta resposta de busca que chegou atrasada
+
   init() {
     this._bindTabs();
     this._bindButtons();
@@ -279,6 +287,7 @@ const Payment = {
         tab.classList.add('active');
         const panel = document.getElementById(tab.dataset.tab);
         if (panel) panel.classList.add('active');
+        this._ajustarRodapeOrcamento();
         // Focar no primeiro input do painel
         if (panel) {
           const input = panel.querySelector('input');
@@ -290,8 +299,18 @@ const Payment = {
 
   _bindButtons() {
     document.getElementById('btn-pay-add').addEventListener('click', () => this.registrarPagamento());
-    document.getElementById('btn-pay-finish').addEventListener('click', () => this.finalizarVenda());
+    document.getElementById('btn-pay-finish').addEventListener('click', () => this._finalizarOuOrcamento());
     document.getElementById('btn-pay-cancel').addEventListener('click', () => this.fechar());
+
+    // Orcamento: troca o cliente ja identificado (volta o campo CPF/codigo/nome)
+    document.getElementById('btn-orcamento-trocar-cliente').addEventListener('click', () => {
+      this._orcTrocarCliente = true;
+      this._mostrarClienteOrcamento();
+      const input = document.getElementById('pay-orcamento-cliente');
+      input.value = '';
+      setTimeout(() => input.focus(), 50);
+    });
+    this._bindBuscaClienteOrcamento();
 
     // Modal do QR Code PIX
     document.getElementById('btn-pix-qr-ok').addEventListener('click', () => this._resolverPixQr(true));
@@ -316,13 +335,14 @@ const Payment = {
       'F2': () => this._selectTab('pay-cheque'),
       'F3': () => this._selectTab(this._tefHabilitado ? 'pay-tef' : 'pay-cartao'),
       'F4': () => { if (!this._tefHabilitado) this._selectTab('pay-pix'); },
-      'F5': () => this.finalizarVenda(),
+      'F5': () => this._finalizarOuOrcamento(),
       'F6': () => this._selectTab('pay-pos'),
-      'F8': () => this.registrarPagamento(),
+      'F7': () => this._selectTab('pay-orcamento'),
+      'F8': () => { if (!this._abaOrcamentoAtiva()) this.registrarPagamento(); },
       'F9': () => this._atalhoTEF('credito'),
       'F10': () => this._atalhoTEF('debito'),
       'F11': () => this._atalhoTEF('pix'),
-      'Enter': () => this.registrarPagamento(),
+      'Enter': () => this._abaOrcamentoAtiva() ? this.salvarOrcamento() : this.registrarPagamento(),
       'Escape': () => this.fechar()
     });
 
@@ -570,6 +590,9 @@ const Payment = {
     this._renderParcelasCobranca();
     // Carregar resumo
     await this.atualizarResumo();
+    document.getElementById('pay-orcamento-cliente').value = '';
+    this._orcTrocarCliente = false;
+    this._fecharSugestoesOrcamento();
     Modal.open('modal-pagamento');
 
     // Focar no input de dinheiro
@@ -598,6 +621,8 @@ const Payment = {
     document.getElementById('pay-total').textContent = Utils.formatCurrency(d.total);
     document.getElementById('pay-pago').textContent = Utils.formatCurrency(d.totalPago);
     document.getElementById('pay-restante').textContent = Utils.formatCurrency(d.restante);
+    const avisoOrc = document.getElementById('pay-orcamento-aviso');
+    if (avisoOrc) avisoOrc.classList.toggle('hidden', !(d.totalPago > 0));
 
     // Atualizar sidebar do POS tambem
     document.getElementById('pos-total-pago').textContent = Utils.formatMoney(d.totalPago);
@@ -1115,6 +1140,242 @@ const Payment = {
   },
 
   // ========== FIM TEF ==========
+
+  // ========== ORCAMENTO (aba F7) ==========
+
+  // [orcamento] validade_dias do apoloweb.ini (push do Delphi no init)
+  aplicarConfigOrcamento(dias) {
+    const n = parseInt(dias, 10);
+    if (n > 0) this._orcamentoValidadeDias = n;
+  },
+
+  _abaOrcamentoAtiva() {
+    const panel = document.getElementById('pay-orcamento');
+    return !!(panel && panel.classList.contains('active'));
+  },
+
+  // Na aba Orcamento nao ha o que registrar: F8 some e o F5 vira "Salvar"
+  _ajustarRodapeOrcamento() {
+    const orc = this._abaOrcamentoAtiva();
+    const btnAdd = document.getElementById('btn-pay-add');
+    const btnFinish = document.getElementById('btn-pay-finish');
+    if (btnAdd) btnAdd.style.display = orc ? 'none' : '';
+    if (btnFinish) btnFinish.textContent = orc ? 'F5 Salvar Orçamento' : 'F5 Finalizar';
+    if (!orc) return;
+
+    const dias = this._orcamentoValidadeDias;
+    const ate = new Date();
+    ate.setDate(ate.getDate() + dias);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('pay-orcamento-dias').textContent =
+      dias + (dias === 1 ? ' dia' : ' dias');
+    document.getElementById('pay-orcamento-ate').textContent =
+      pad(ate.getDate()) + '/' + pad(ate.getMonth() + 1) + '/' + ate.getFullYear();
+    this._mostrarClienteOrcamento();
+  },
+
+  // Cliente ja identificado na venda (F-cliente do PDV): so mostra. Senao
+  // pede CPF/CNPJ, codigo ou nome - orcamento sem cliente nao e' aceito.
+  _mostrarClienteOrcamento() {
+    const cons = Customers.getConsumidorAtual();
+    const ok = !this._orcTrocarCliente && !!(cons && (cons.cpfCnpj || cons.encontrado));
+    document.getElementById('pay-orcamento-cliente-ok').classList.toggle('hidden', !ok);
+    document.getElementById('pay-orcamento-cliente-box').classList.toggle('hidden', ok);
+    if (ok) {
+      document.getElementById('pay-orcamento-cliente-nome').textContent =
+        cons.nome + (cons.cpfCnpj ? ' - ' + Customers._formatarCpfCnpj(cons.cpfCnpj) : '');
+    }
+    return ok;
+  },
+
+  // Busca enquanto digita (nome, codigo ou CPF/CNPJ). A lista ja vem com o
+  // primeiro selecionado: Enter vincula; Esc fecha e o Enter seguinte salva
+  // com o texto digitado como nome livre. O listener do input roda antes do
+  // global (keyboard.js), entao stopPropagation segura Enter/Esc aqui.
+  _bindBuscaClienteOrcamento() {
+    const input = document.getElementById('pay-orcamento-cliente');
+    const buscar = Utils.debounce(() => this._buscarClienteOrcamento(input.value.trim()), 250);
+
+    input.addEventListener('input', () => {
+      if (input.value.trim().length < 2) this._fecharSugestoesOrcamento();
+      else buscar();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (!this._sugestoesOrcamentoAbertas()) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation();
+        this._moverSugestaoOrcamento(e.key === 'ArrowDown' ? 1 : -1);
+      } else if (e.key === 'Enter' && this._orcSugIdx >= 0) {
+        e.preventDefault(); e.stopPropagation();
+        this._vincularSugestaoOrcamento(this._orcSugIdx);
+      } else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        this._fecharSugestoesOrcamento();
+      }
+    });
+    input.addEventListener('blur', () => setTimeout(() => this._fecharSugestoesOrcamento(), 150));
+  },
+
+  _sugestoesOrcamentoAbertas() {
+    return !document.getElementById('pay-orcamento-sugestoes').classList.contains('hidden');
+  },
+
+  _fecharSugestoesOrcamento() {
+    this._orcBuscaSeq++;
+    this._orcSugestoes = [];
+    this._orcSugIdx = -1;
+    const lista = document.getElementById('pay-orcamento-sugestoes');
+    lista.innerHTML = '';
+    lista.classList.add('hidden');
+  },
+
+  async _buscarClienteOrcamento(filtro) {
+    if (filtro.length < 2) return;
+    const seq = ++this._orcBuscaSeq;
+    const resp = await Bridge.buscarCliente(filtro);
+    if (seq !== this._orcBuscaSeq) return;
+    if (!resp || !resp.sucesso) return;
+
+    this._orcSugestoes = resp.dados || [];
+    this._orcSugIdx = this._orcSugestoes.length > 0 ? 0 : -1;
+    const lista = document.getElementById('pay-orcamento-sugestoes');
+    lista.innerHTML = '';
+
+    if (this._orcSugestoes.length === 0) {
+      const vazio = document.createElement('div');
+      vazio.className = 'orc-sugestao-vazio';
+      vazio.textContent = 'Nenhum cliente encontrado - Enter salva com o nome digitado';
+      lista.appendChild(vazio);
+    }
+    this._orcSugestoes.forEach((cli, idx) => {
+      const item = document.createElement('div');
+      item.className = 'orc-sugestao';
+      item.dataset.index = idx;
+      [['cod', cli.codcli],
+       ['nome', cli.nome],
+       ['doc', Customers._formatarCpfCnpj(cli.cpf_cnpj || '')],
+       ['cid', cli.cidade ? cli.cidade + '/' + (cli.uf || '') : '']
+      ].forEach(([cls, txt]) => {
+        const span = document.createElement('span');
+        span.className = cls;
+        span.textContent = txt;
+        item.appendChild(span);
+      });
+      // mousedown (e nao click) para vincular antes do blur fechar a lista
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this._vincularSugestaoOrcamento(idx);
+      });
+      lista.appendChild(item);
+    });
+    lista.classList.remove('hidden');
+    this._moverSugestaoOrcamento(0);
+  },
+
+  _moverSugestaoOrcamento(delta) {
+    const n = this._orcSugestoes.length;
+    if (n === 0) return;
+    this._orcSugIdx = Math.max(0, Math.min(n - 1, this._orcSugIdx + delta));
+    document.querySelectorAll('#pay-orcamento-sugestoes .orc-sugestao').forEach(el => {
+      const sel = Number(el.dataset.index) === this._orcSugIdx;
+      el.classList.toggle('selected', sel);
+      if (sel) el.scrollIntoView({ block: 'nearest' });
+    });
+  },
+
+  async _vincularSugestaoOrcamento(idx) {
+    const cli = this._orcSugestoes[idx];
+    this._fecharSugestoesOrcamento();
+    if (!cli) return;
+    const resp = await Bridge.vincularCliente(cli.codcli);
+    if (!resp || !resp.sucesso) return;
+    const dados = resp.dados;
+    dados.encontrado = true;
+    Customers._exibirConsumidorNoPDV(dados);
+    this._orcTrocarCliente = false;
+    document.getElementById('pay-orcamento-cliente').value = '';
+    this._mostrarClienteOrcamento();
+    Toast.success('Cliente vinculado: ' + dados.nome);
+  },
+
+  // Resolve o que foi digitado: 11/14 digitos = CPF/CNPJ, outros digitos =
+  // codigo do cliente, texto = nome livre (vai como nomeCliente no salvar).
+  // Retorna o nome livre, '' se ja vinculou, ou null se nao identificou.
+  async _identificarClienteOrcamento() {
+    if (this._mostrarClienteOrcamento()) return '';
+    const input = document.getElementById('pay-orcamento-cliente');
+    const txt = input.value.trim();
+    if (!txt) {
+      Toast.warning('Identifique o cliente do orçamento (CPF/CNPJ, código ou nome)');
+      input.focus();
+      return null;
+    }
+    const dig = txt.replace(/[.\-\/\s]/g, '');
+    if (!/^\d+$/.test(dig)) {
+      if (txt.length < 3) {
+        Toast.warning('Informe o nome completo do cliente');
+        input.focus();
+        return null;
+      }
+      return txt;
+    }
+    const resp = (dig.length === 11 || dig.length === 14)
+      ? await Bridge.identificarConsumidor(dig)
+      : await Bridge.vincularCliente(parseInt(dig, 10));
+    if (!resp || !resp.sucesso) {
+      input.focus();
+      return null;
+    }
+    const dados = resp.dados;
+    if (dados.encontrado === undefined) dados.encontrado = true;
+    Customers._exibirConsumidorNoPDV(dados);
+    this._orcTrocarCliente = false;
+    this._mostrarClienteOrcamento();
+    return '';
+  },
+
+  _finalizarOuOrcamento() {
+    if (this._abaOrcamentoAtiva()) this.salvarOrcamento();
+    else this.finalizarVenda();
+  },
+
+  // Fecha a venda como orcamento: sem NFC-e (nao chama o gerarNFCe), sem
+  // pagamento e fora do caixa. O Delphi grava codoper 'O', sobe para a
+  // retaguarda e imprime o comprovante sem valor fiscal.
+  async salvarOrcamento() {
+    if (this._salvandoOrcamento) return;
+    if (this._tefAguardando) return;
+
+    const nomeCliente = await this._identificarClienteOrcamento();
+    if (nomeCliente === null) return;
+
+    const ok = await Dialog.confirm('Orçamento',
+      'Salvar esta venda como ORÇAMENTO? Não será emitida NFC-e e nada será recebido.');
+    if (!ok) return;
+
+    this._salvandoOrcamento = true;
+    let resp;
+    try {
+      resp = await Bridge.salvarOrcamento(nomeCliente);
+    } catch (err) {
+      Toast.error('Sem resposta ao salvar o orçamento: ' + err.message);
+      return;
+    } finally {
+      this._salvandoOrcamento = false;
+    }
+    if (!resp || !resp.sucesso) {
+      this.atualizarResumo();
+      return;
+    }
+
+    const d = resp.dados || {};
+    Modal.close('modal-pagamento');
+    Toast.success('Orçamento salvo - válido até ' + (d.validade || ''));
+    if (d.impresso === false) {
+      Toast.warning('Orçamento salvo, mas não imprimiu: ' + (d.erroImpressao || 'falha na impressora'));
+    }
+    POS.limparVenda();
+  },
 
   async finalizarVenda() {
     let resp;

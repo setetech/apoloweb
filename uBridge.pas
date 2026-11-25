@@ -8,7 +8,7 @@ uses
   System.Math, System.StrUtils, System.IOUtils, System.NetEncoding,
   Winapi.ShellAPI, Winapi.Windows,
   Uni, uSQLiteDB, uConstantesWeb, uTypesApoloWeb, uTEF, Data.DB,WinSpool, Printers,
-  uContingencia, uSyncLog, uTEFLog, uPixCD, uTEFCliSiTef;
+  uContingencia, uSyncLog, uTEFLog, uPixCD, uTEFCliSiTef, uAtualizacao;
 
 
 type
@@ -78,6 +78,11 @@ type
     // Venda TEF na thread do TEF (inclusive o desfazimento de uma aprovacao
     // que chegou depois do cancelamento). So a thread principal le e escreve.
     FTEFEmCurso: Boolean;
+
+    // Atualizacao da versao: download em thread e exe novo ja extraido,
+    // esperando o "Instalar e Reiniciar". So a thread principal escreve.
+    FAtualizacaoBaixando: Boolean;
+    FAtualizacaoExe: string;
     function DoObterConfigTEF(const AData: string): string;
     function DoIniciarPagamentoTEF(const AData: string): string;
     function DoCancelarTEF(const AData: string): string;
@@ -110,6 +115,11 @@ type
     function DoSalvarParametrosImpressora(const AData: string): string;
     function DoTestarImpressao(const AData: string): string;
     function ImprimirTexto(const ATexto, AImpressora: string): string;
+
+    // Atualizacao da versao do caixa (aba Atualizacao, controle 20)
+    function DoObterInfoAtualizacao(const AData: string): string;
+    function DoBaixarAtualizacao(const AData: string): string;
+    function DoInstalarAtualizacao(const AData: string): string;
     function LerConfigTEFDoJson(const AData: string; out AConfig: TTEFConfig;
       out AErro: string): Boolean;
     procedure ImprimirComprovantesTEF(ACupomId: Integer);
@@ -148,6 +158,10 @@ type
     function DoRegistrarPagamento(const AData: string): string;
     function DoRemoverPagamento(const AData: string): string;
     function DoFinalizarVenda(const AData: string): string;
+    // Orcamento (aba F7 do pagamento): fecha o cupom com codoper 'O', sem
+    // NFC-e, sem pagamento e fora do caixa; imprime o comprovante sem valor fiscal
+    function DoSalvarOrcamento(const AData: string): string;
+    function MontarComprovanteOrcamento(ACupomId: Integer; AValidade: TDate): string;
     function DoListarMeiosPagamento(const AData: string): string;
     function DoListarMeioPagto(const AData: string): string;
     function DoListarPlanosPagamento(const AData: string): string;
@@ -255,6 +269,8 @@ type
     // [TEF] pix_qr=tela: o PDV exibe o QR devolvido pelo gerenciador em vez
     // de mandar o cliente ler no visor do pinpad
     function TEFPixQrNaTela: Boolean;
+    // [orcamento] validade_dias do apoloweb.ini (padrao 7)
+    function OrcamentoValidadeDias: Integer;
   end;
 
 implementation
@@ -274,6 +290,7 @@ const
   CTRL_CANCELAR_VENDA = 5;   // Cancelamento da venda
   CTRL_FECHAR_CAIXA   = 6;   // Fechamento do caixa
   CTRL_SANGRIA        = 18;  // Sangria
+  CTRL_ATUALIZAR_VERSAO = 20; // Atualizar Versao do Caixa
 
   // Meio centavo. Valor em Double nao fecha exato na casa do centavo, entao
   // comparacao de dinheiro usa esta folga em vez de = ou <.
@@ -478,6 +495,25 @@ begin
   Result := FTEFConfig.PixQr = pqTela;
 end;
 
+// Lido a cada uso: mudar o .ini vale no proximo orcamento, sem reiniciar
+function TApoloBridge.OrcamentoValidadeDias: Integer;
+var
+  LIni: TIniFile;
+begin
+  try
+    LIni := TIniFile.Create(ARQ_APOLOWEB_INI);
+    try
+      Result := LIni.ReadInteger('orcamento', 'validade_dias', 7);
+    finally
+      LIni.Free;
+    end;
+  except
+    Result := 7;
+  end;
+  if Result < 1 then
+    Result := 7;
+end;
+
 destructor TApoloBridge.Destroy;
 begin
   FTEFClient := nil;  // interface: liberada por contagem de referencia
@@ -507,6 +543,7 @@ begin
     else if AAction = 'registrarPagamento' then Result := DoRegistrarPagamento(AData)
     else if AAction = 'removerPagamento' then Result := DoRemoverPagamento(AData)
     else if AAction = 'finalizarVenda' then Result := DoFinalizarVenda(AData)
+    else if AAction = 'salvarOrcamento' then Result := DoSalvarOrcamento(AData)
     else if AAction = 'listarMeiosPagamento' then Result := DoListarMeiosPagamento(AData)
     else if AAction = 'listarMeioPagto' then Result := DoListarMeioPagto(AData)
     else if AAction = 'listarPlanosPagamento' then Result := DoListarPlanosPagamento(AData)
@@ -570,6 +607,10 @@ begin
     else if AAction = 'obterParametrosImpressora' then Result := DoObterParametrosImpressora(AData)
     else if AAction = 'salvarParametrosImpressora' then Result := DoSalvarParametrosImpressora(AData)
     else if AAction = 'testarImpressao' then Result := DoTestarImpressao(AData)
+    // Atualizacao da versao do caixa
+    else if AAction = 'obterInfoAtualizacao' then Result := DoObterInfoAtualizacao(AData)
+    else if AAction = 'baixarAtualizacao' then Result := DoBaixarAtualizacao(AData)
+    else if AAction = 'instalarAtualizacao' then Result := DoInstalarAtualizacao(AData)
     // Sistema
     else if AAction = 'forcarSincronizacao' then
     begin
@@ -2011,6 +2052,273 @@ begin
   FCupomAtualId := 0;
 end;
 
+// Orcamento (aba F7 do modal de pagamento). Fecha o cupom com codoper 'O':
+//  - nao gera NFC-e nem consome numeracao (o front nao chama o gerarNFCe);
+//  - nao aceita pagamento: nada foi recebido, entao nao entra no numerario
+//    nem no fechamento (que somam so codoper 'V');
+//  - sobe para msapolo_venda com codoper 'O' e a MSAPOLO_GERAR_NF transforma
+//    em MSNF com POSICAO 'O' (docs/msapolo_gerar_nf*.sql).
+// A validade ([orcamento] validade_dias) fica no cupons.obs e sai no comprovante.
+function TApoloBridge.DoSalvarOrcamento(const AData: string): string;
+var
+  LCupomId, LQtdItens, LDias, LCodConsumidor: Integer;
+  LTotal: Double;
+  LValidade: TDate;
+  LErroImpressao, LNomeCliente: string;
+  LDados, LJson: TJSONObject;
+  LQuery: TUniQuery;
+  LIdentificado: Boolean;
+begin
+  if (FCupomAtualId = 0) or not (FEstadoCaixa in [ecRegistrando, ecPagamento]) then
+    Exit(CriarRespostaErro('Nao ha venda em andamento'));
+
+  LQtdItens := StrToIntDef(VarToStr(FSQLite.ExecutarScalar(
+    'SELECT COUNT(*) FROM cupom_itens WHERE cupom_id = ' + IntToStr(FCupomAtualId) +
+    ' AND dtcancel IS NULL')), 0);
+  if LQtdItens = 0 then
+    Exit(CriarRespostaErro('Orcamento sem itens'));
+
+  LTotal := CalcularTotalCupom(FCupomAtualId);
+  if LTotal <= 0 then
+    Exit(CriarRespostaErro('Orcamento com valor zerado'));
+
+  // Pagamento registrado (inclusive TEF aprovado) e' dinheiro recebido: isso
+  // e' venda, nao orcamento. O operador remove os pagamentos antes.
+  if CalcularTotalPago(FCupomAtualId) > 0 then
+    Exit(CriarRespostaErro('Ha pagamento registrado nesta venda. ' +
+      'Remova os pagamentos antes de salvar como orcamento.'));
+
+  // Orcamento sem cliente nao serve para retomar depois: exige CPF/CNPJ,
+  // cliente cadastrado (codcli que nao seja o consumidor padrao) ou ao menos
+  // o nome digitado na aba F7
+  LCodConsumidor := StrToIntDef(FSQLite.ObterEstado(KEY_CODCONSUMIDOR, '0'), 0);
+  LNomeCliente := '';
+  LJson := TJSONObject.ParseJSONValue(AData) as TJSONObject;
+  if LJson <> nil then
+  try
+    LNomeCliente := Trim(LJson.GetValue<string>('nomeCliente', ''));
+  finally
+    LJson.Free;
+  end;
+  // Nome livre substitui o cliente que estava na venda (operador trocou no
+  // "Alterar"): o codcli volta para o consumidor padrao logo abaixo
+  if LNomeCliente <> '' then
+    FSQLite.ExecutarSQL(
+      'UPDATE cupons SET descnomecliente = :p0, codcli = NULL, cpf_cnpj = NULL ' +
+      'WHERE id = :p1',
+      [Copy(LNomeCliente, 1, TAM_NOME_CLIENTE), FCupomAtualId]);
+
+  LQuery := FSQLite.ExecutarSelect(
+    'SELECT codcli, cpf_cnpj, descnomecliente FROM cupons WHERE id = ' +
+    IntToStr(FCupomAtualId));
+  try
+    LIdentificado := (Trim(LQuery.FieldByName('cpf_cnpj').AsString) <> '') or
+      ((LQuery.FieldByName('codcli').AsInteger > 0) and
+       (LQuery.FieldByName('codcli').AsInteger <> LCodConsumidor)) or
+      ((Trim(LQuery.FieldByName('descnomecliente').AsString) <> '') and
+       not SameText(Trim(LQuery.FieldByName('descnomecliente').AsString), 'CONSUMIDOR'));
+  finally
+    LQuery.Free;
+  end;
+  if not LIdentificado then
+    Exit(CriarRespostaErro('Identifique o cliente do orcamento ' +
+      '(CPF/CNPJ, codigo do cliente ou nome)'));
+
+  LDias := OrcamentoValidadeDias;
+  LValidade := IncDay(Date, LDias);
+  LCupomId := FCupomAtualId;
+
+  FSQLite.ExecutarSQL(
+    'UPDATE cupons SET dthrfimvenda = datetime(''now'',''localtime''), ' +
+    'valortroco = 0, codoper = ''O'', obs = :p0 WHERE id = :p1',
+    ['ORCAMENTO VALIDO ATE ' + FormatDateTime('dd/mm/yyyy', LValidade), LCupomId]
+  );
+
+  // Mesmo consumidor padrao da venda (DoFinalizarVenda): sem ele o MSNF do
+  // ERP fica sem cliente valido
+  if LCodConsumidor > 0 then
+    FSQLite.ExecutarSQL(
+      'UPDATE cupons SET codcli = :p0 ' +
+      'WHERE id = :p1 AND (codcli IS NULL OR codcli = 0)',
+      [LCodConsumidor, LCupomId]
+    );
+
+  FEstadoCaixa := ecLivre;
+  FSQLite.SalvarEstado(KEY_ESTADO, IntToStr(Ord(FEstadoCaixa)));
+  FCupomAtualId := 0;
+
+  SyncLog('ORCAMENTO cupom=%d: salvo, total=%.2f, validade %s',
+    [LCupomId, LTotal, FormatDateTime('dd/mm/yyyy', LValidade)]);
+
+  if Assigned(FOnUploadVenda) then
+  begin
+    try
+      FOnUploadVenda(LCupomId);
+    except
+      on E: Exception do
+        SyncLog('UPLOAD orcamento cupom=%d: falha no disparo imediato - [%s] %s',
+          [LCupomId, E.ClassName, E.Message]);
+    end;
+  end;
+
+  // Impressora com problema nao desfaz o orcamento: ele ja esta salvo
+  try
+    LErroImpressao := ImprimirTextoCupom(MontarComprovanteOrcamento(LCupomId, LValidade));
+  except
+    on E: Exception do
+      LErroImpressao := E.Message;
+  end;
+
+  LDados := TJSONObject.Create;
+  LDados.AddPair('cupomId', TJSONNumber.Create(LCupomId));
+  LDados.AddPair('total', TJSONNumber.Create(LTotal));
+  LDados.AddPair('validadeDias', TJSONNumber.Create(LDias));
+  LDados.AddPair('validade', FormatDateTime('dd/mm/yyyy', LValidade));
+  LDados.AddPair('impresso', TJSONBool.Create(LErroImpressao = ''));
+  LDados.AddPair('erroImpressao', LErroImpressao);
+  Result := CriarRespostaSucesso('Orcamento salvo', LDados);
+end;
+
+// Comprovante do orcamento em texto, pelo caminho do cupom (ESCPOS ou texto
+// cru). Nao e' DANFE: sai com o aviso de documento sem valor fiscal.
+function TApoloBridge.MontarComprovanteOrcamento(ACupomId: Integer;
+  AValidade: TDate): string;
+const
+  LARGURA = 40;
+var
+  LQuery: TUniQuery;
+  LTexto: TStringBuilder;
+  LDias: Integer;
+  LDtHr: string;
+
+  function Centralizar(const ATexto: string): string;
+  begin
+    if Length(ATexto) >= LARGURA then
+      Result := ATexto
+    else
+      Result := StringOfChar(' ', (LARGURA - Length(ATexto)) div 2) + ATexto;
+  end;
+
+  // Rotulo a esquerda e valor encostado na direita
+  function Linha(const AEsq, ADir: string): string;
+  var
+    LEspaco: Integer;
+  begin
+    LEspaco := LARGURA - Length(AEsq) - Length(ADir);
+    if LEspaco < 1 then
+      LEspaco := 1;
+    Result := AEsq + StringOfChar(' ', LEspaco) + ADir;
+  end;
+
+  function Valor(AValor: Double): string;
+  begin
+    Result := FormatFloat('#,##0.00', AValor);
+  end;
+
+begin
+  LDias := DaysBetween(Date, AValidade);
+  LTexto := TStringBuilder.Create;
+  try
+    LQuery := FSQLite.ExecutarSelect('SELECT razao_social, cnpj FROM empresa WHERE id = 1');
+    try
+      if not LQuery.Eof then
+      begin
+        LTexto.AppendLine(Centralizar(Trim(LQuery.FieldByName('razao_social').AsString)));
+        LTexto.AppendLine(Centralizar('CNPJ: ' + Trim(LQuery.FieldByName('cnpj').AsString)));
+      end;
+    finally
+      LQuery.Free;
+    end;
+
+    LTexto.AppendLine(StringOfChar('=', LARGURA));
+    LTexto.AppendLine(Centralizar('ORCAMENTO'));
+    LTexto.AppendLine(Centralizar('DOCUMENTO SEM VALOR FISCAL'));
+    LTexto.AppendLine(Centralizar('NAO E DOCUMENTO DE VENDA'));
+    LTexto.AppendLine(StringOfChar('=', LARGURA));
+
+    LQuery := FSQLite.ExecutarSelect(
+      'SELECT numcupom, numcaixa, dthrfimvenda, cpf_cnpj, descnomecliente ' +
+      'FROM cupons WHERE id = ' + IntToStr(ACupomId));
+    try
+      if not LQuery.Eof then
+      begin
+        // dthrfimvenda vem como 'yyyy-mm-dd hh:nn:ss'
+        LDtHr := LQuery.FieldByName('dthrfimvenda').AsString;
+        LTexto.AppendLine('ORCAMENTO: ' + LQuery.FieldByName('numcupom').AsString +
+          '  CAIXA: ' + Format('%2.2d', [LQuery.FieldByName('numcaixa').AsInteger]));
+        LTexto.AppendLine('EMISSAO: ' + Copy(LDtHr, 9, 2) + '/' + Copy(LDtHr, 6, 2) +
+          '/' + Copy(LDtHr, 1, 4) + ' ' + Copy(LDtHr, 12, 8));
+        LTexto.AppendLine('OPERADOR: ' + IntToStr(FMatriculaLogada) + ' - ' + FNomeOperador);
+        if Trim(LQuery.FieldByName('descnomecliente').AsString) <> '' then
+          LTexto.AppendLine('CLIENTE: ' + Trim(LQuery.FieldByName('descnomecliente').AsString));
+        if Trim(LQuery.FieldByName('cpf_cnpj').AsString) <> '' then
+          LTexto.AppendLine('CPF/CNPJ: ' + Trim(LQuery.FieldByName('cpf_cnpj').AsString));
+      end;
+    finally
+      LQuery.Free;
+    end;
+
+    LTexto.AppendLine(StringOfChar('-', LARGURA));
+    LTexto.AppendLine('ITEM CODIGO DESCRICAO');
+    LTexto.AppendLine(Linha('     QTD UN x VL UNIT', 'VL TOTAL'));
+    LTexto.AppendLine(StringOfChar('-', LARGURA));
+
+    LQuery := FSQLite.ExecutarSelect(
+      'SELECT numseqitem, codprod, descricao, unidade, qt, punit, vlprod ' +
+      'FROM cupom_itens WHERE cupom_id = ' + IntToStr(ACupomId) +
+      ' AND dtcancel IS NULL ORDER BY numseqitem');
+    try
+      while not LQuery.Eof do
+      begin
+        LTexto.AppendLine(Copy(Format('%3.3d', [LQuery.FieldByName('numseqitem').AsInteger]) +
+          ' ' + LQuery.FieldByName('codprod').AsString +
+          ' ' + Trim(LQuery.FieldByName('descricao').AsString), 1, LARGURA));
+        LTexto.AppendLine(Linha('     ' +
+          FormatFloat('#,##0.###', LQuery.FieldByName('qt').AsFloat) + ' ' +
+          Trim(LQuery.FieldByName('unidade').AsString) + ' x ' +
+          Valor(LQuery.FieldByName('punit').AsFloat),
+          Valor(LQuery.FieldByName('vlprod').AsFloat)));
+        LQuery.Next;
+      end;
+    finally
+      LQuery.Free;
+    end;
+
+    LTexto.AppendLine(StringOfChar('-', LARGURA));
+    LQuery := FSQLite.ExecutarSelect(
+      'SELECT COALESCE(valordesc, 0) AS valordesc, ' +
+      'COALESCE(valorencargo, 0) AS valorencargo FROM cupons WHERE id = ' +
+      IntToStr(ACupomId));
+    try
+      if not LQuery.Eof then
+      begin
+        if LQuery.FieldByName('valordesc').AsFloat > 0 then
+          LTexto.AppendLine(Linha('DESCONTO R$',
+            '-' + Valor(LQuery.FieldByName('valordesc').AsFloat)));
+        if LQuery.FieldByName('valorencargo').AsFloat > 0 then
+          LTexto.AppendLine(Linha('ACRESCIMO R$',
+            Valor(LQuery.FieldByName('valorencargo').AsFloat)));
+      end;
+    finally
+      LQuery.Free;
+    end;
+    LTexto.AppendLine(Linha('TOTAL DO ORCAMENTO R$', Valor(CalcularTotalCupom(ACupomId))));
+    LTexto.AppendLine(StringOfChar('=', LARGURA));
+    if LDias = 1 then
+      LTexto.AppendLine(Centralizar('VALIDO POR 1 DIA'))
+    else
+      LTexto.AppendLine(Centralizar('VALIDO POR ' + IntToStr(LDias) + ' DIAS'));
+    LTexto.AppendLine(Centralizar('ATE ' + FormatDateTime('dd/mm/yyyy', AValidade)));
+    LTexto.AppendLine(Centralizar('Precos sujeitos a alteracao apos'));
+    LTexto.AppendLine(Centralizar('a validade e conforme o estoque.'));
+    LTexto.AppendLine(StringOfChar('=', LARGURA));
+    LTexto.AppendLine(Centralizar('ORCAMENTO - DOCUMENTO SEM VALOR FISCAL'));
+    Result := LTexto.ToString;
+  finally
+    LTexto.Free;
+  end;
+end;
+
 function TApoloBridge.DoListarMeiosPagamento(const AData: string): string;
 var
   LQuery: TUniQuery;
@@ -2736,7 +3044,7 @@ begin
 
     LCancelItens := VarToFloatDef(FSQLite.ExecutarScalar(
       'SELECT COALESCE(SUM(valorcancel), 0) FROM cupons ' +
-      'WHERE datamovto = ''' + ADia + '''' + LFiltro), 0);
+      'WHERE COALESCE(codoper, '''') <> ''O'' AND datamovto = ''' + ADia + '''' + LFiltro), 0);
 
     LSangrias := VarToFloatDef(FSQLite.ExecutarScalar(
       'SELECT COALESCE(SUM(valor), 0) FROM numerario WHERE tipo = ''SANGRIA'' AND ' +
@@ -3685,7 +3993,7 @@ end;
 function TApoloBridge.DoBuscarCliente(const AData: string): string;
 var
   LJson: TJSONObject;
-  LFiltro: string;
+  LFiltro, LWhere, LPalavra: string;
   LQuery: TUniQuery;
   LArr: TJSONArray;
   LObj: TJSONObject;
@@ -3698,15 +4006,31 @@ begin
 
     // Nome com apostrofo (Sant'Ana, D'Angelo) quebrava o SQL e a busca voltava
     // erro em vez de resultado. Mesmo escape que DoBuscarProduto ja faz.
-    LFiltro := StringReplace(LFiltro, '''', '''''', [rfReplaceAll]);
+    LFiltro := Trim(StringReplace(LFiltro, '''', '''''', [rfReplaceAll]));
+    if LFiltro = '' then
+      Exit(CriarRespostaSucesso('OK', TJSONArray.Create));
 
+    // Cada palavra precisa aparecer no nome (ou no CPF/CNPJ), em qualquer
+    // ordem: "batista igreja" acha "IGREJA BATISTA CENTRAL". CPF/CNPJ
+    // digitado sem mascara tambem casa com o gravado formatado.
+    LWhere := '';
+    for LPalavra in LFiltro.Split([' '], TStringSplitOptions.ExcludeEmpty) do
+    begin
+      if LWhere <> '' then LWhere := LWhere + ' AND ';
+      LWhere := LWhere + '(nome LIKE ''%' + LPalavra + '%'' OR ' +
+        'REPLACE(REPLACE(REPLACE(cpf_cnpj, ''.'', ''''), ''-'', ''''), ''/'', '''') ' +
+        'LIKE ''%' + StringReplace(StringReplace(StringReplace(LPalavra,
+          '.', '', [rfReplaceAll]), '-', '', [rfReplaceAll]), '/', '', [rfReplaceAll]) +
+        '%'')';
+    end;
+
+    // Codigo exato primeiro, depois nome que comeca com o texto, depois o resto
     LQuery := FSQLite.ExecutarSelect(
       'SELECT codcli, cpf_cnpj, nome, cidade, uf, limite_credito ' +
-      'FROM clientes WHERE ' +
-      'nome LIKE ''%' + LFiltro + '%'' OR ' +
-      'cpf_cnpj LIKE ''%' + LFiltro + '%'' OR ' +
+      'FROM clientes WHERE (' + LWhere + ') OR ' +
       'CAST(codcli AS TEXT) = ''' + LFiltro + ''' ' +
-      'ORDER BY nome LIMIT 50'
+      'ORDER BY CASE WHEN CAST(codcli AS TEXT) = ''' + LFiltro + ''' THEN 0 ' +
+      'WHEN nome LIKE ''' + LFiltro + '%'' THEN 1 ELSE 2 END, nome LIMIT 50'
     );
     try
       LArr := TJSONArray.Create;
@@ -5124,6 +5448,164 @@ begin
   finally
     LJson.Free;
   end;
+end;
+
+// =========================================================================
+// ATUALIZACAO DA VERSAO DO CAIXA (aba Atualizacao)
+// Link do .zip em [atualizacao] url do apoloweb.ini; exige o controle 20 da
+// rotina 8002 para baixar. Ver uAtualizacao.
+// =========================================================================
+
+function TApoloBridge.DoObterInfoAtualizacao(const AData: string): string;
+var
+  LDados: TJSONObject;
+begin
+  LDados := TJSONObject.Create;
+  LDados.AddPair('versaoAtual', VersaoExecutavel);
+  LDados.AddPair('url', UrlAtualizacaoConfigurada);
+  LDados.AddPair('arquivoIni', ARQ_APOLOWEB_INI);
+  LDados.AddPair('secaoIni', ATUALIZACAO_SECAO);
+  LDados.AddPair('baixando', TJSONBool.Create(FAtualizacaoBaixando));
+  LDados.AddPair('pronta', TJSONBool.Create(
+    (FAtualizacaoExe <> '') and FileExists(FAtualizacaoExe)));
+  if FAtualizacaoExe <> '' then
+    LDados.AddPair('versaoNova', VersaoArquivo(FAtualizacaoExe));
+  Result := CriarRespostaSucesso('OK', LDados);
+end;
+
+{ Retorna na hora; o andamento chega por 'atualizacaoProgresso' e o desfecho
+  por 'atualizacaoResultado'. A troca do exe so' acontece no
+  instalarAtualizacao, depois que o operador ve a versao baixada. }
+function TApoloBridge.DoBaixarAtualizacao(const AData: string): string;
+var
+  LJson: TJSONObject;
+  LMatAutorizou: Integer;
+  LErro, LUrl: string;
+begin
+  if FAtualizacaoBaixando then
+    Exit(CriarRespostaErro('O download da nova versao ja esta em andamento'));
+
+  LJson := TJSONObject.ParseJSONValue(AData) as TJSONObject;
+  if LJson = nil then
+    LJson := TJSONObject.Create;
+  try
+    if not ValidarAutorizacao(CTRL_ATUALIZAR_VERSAO, LJson, LMatAutorizou, LErro) then
+    begin
+      if LErro = '' then
+        LErro := 'Operador sem permissao para atualizar a versao do caixa';
+      Exit(CriarRespostaSemPermissao(LErro));
+    end;
+  finally
+    LJson.Free;
+  end;
+
+  LUrl := UrlAtualizacaoConfigurada;
+  SyncLog('ATUALIZACAO: download autorizado pela matricula %d', [LMatAutorizou]);
+  FAtualizacaoBaixando := True;
+  FAtualizacaoExe := '';
+
+  TThread.CreateAnonymousThread(
+    procedure
+    var
+      LExe, LErroThread: string;
+      LUltimoAviso: Int64;
+    begin
+      LExe := '';
+      LErroThread := '';
+      LUltimoAviso := -1;
+      try
+        LExe := BaixarNovaVersao(LUrl,
+          procedure(ABaixado, ATotal: Int64)
+          begin
+            // Um aviso a cada 256 KB: o bastante para a barra andar sem
+            // inundar a fila da thread principal
+            if (LUltimoAviso >= 0) and (ABaixado - LUltimoAviso < 262144) and
+               (ABaixado <> ATotal) then
+              Exit;
+            LUltimoAviso := ABaixado;
+            TThread.Queue(nil,
+              procedure
+              var
+                LProg: TJSONObject;
+              begin
+                LProg := TJSONObject.Create;
+                try
+                  LProg.AddPair('baixado', TJSONNumber.Create(ABaixado));
+                  LProg.AddPair('total', TJSONNumber.Create(ATotal));
+                  if Assigned(FOnEnviarParaJS) then
+                    FOnEnviarParaJS('atualizacaoProgresso', LProg.ToJSON);
+                finally
+                  LProg.Free;
+                end;
+              end);
+          end);
+      except
+        on E: Exception do
+          LErroThread := E.Message;
+      end;
+
+      TThread.Queue(nil,
+        procedure
+        var
+          LRes: TJSONObject;
+        begin
+          FAtualizacaoBaixando := False;
+          if LErroThread = '' then
+            FAtualizacaoExe := LExe
+          else
+            SyncLog('ATUALIZACAO: falha no download: %s', [LErroThread]);
+
+          LRes := TJSONObject.Create;
+          try
+            LRes.AddPair('sucesso', TJSONBool.Create(LErroThread = ''));
+            LRes.AddPair('erro', LErroThread);
+            LRes.AddPair('versaoAtual', VersaoExecutavel);
+            if LErroThread = '' then
+              LRes.AddPair('versaoNova', VersaoArquivo(LExe));
+            if Assigned(FOnEnviarParaJS) then
+              FOnEnviarParaJS('atualizacaoResultado', LRes.ToJSON);
+          finally
+            LRes.Free;
+          end;
+        end);
+    end
+  ).Start;
+
+  Result := CriarRespostaSucesso('Baixando a nova versao...');
+end;
+
+function TApoloBridge.DoInstalarAtualizacao(const AData: string): string;
+var
+  LReabre: Boolean;
+begin
+  // So' instala o que foi baixado (e autorizado) nesta sessao
+  if (FAtualizacaoExe = '') or not FileExists(FAtualizacaoExe) then
+    Exit(CriarRespostaErro('Baixe a nova versao antes de instalar'));
+
+  if (FEstadoCaixa = ecRegistrando) or (FEstadoCaixa = ecPagamento) then
+    Exit(CriarRespostaErro('Finalize a venda em andamento antes de atualizar o caixa'));
+
+  try
+    LReabre := InstalarNovaVersao(FAtualizacaoExe);
+  except
+    on E: Exception do
+      Exit(CriarRespostaErro(E.Message));
+  end;
+  FAtualizacaoExe := '';
+
+  if LReabre then
+    Result := CriarRespostaSucesso('Nova versao instalada. O caixa vai reiniciar.')
+  else
+    Result := CriarRespostaSucesso('Nova versao instalada. O caixa vai fechar: ' +
+      'abra o ApoloWeb novamente.');
+
+  // Fecha depois que a resposta voltou para a tela
+  TThread.ForceQueue(nil,
+    procedure
+    begin
+      if Assigned(FOnFecharApp) then
+        FOnFecharApp(Self);
+    end);
 end;
 
 // Texto cru pelo spooler do Windows - mesmo caminho do resumo de fechamento

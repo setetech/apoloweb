@@ -36,6 +36,7 @@ const NFCePanel = {
     TEFConfig.init();
     TEFAdm.init();
     ImpressoraConfig.init();
+    AtualizacaoVersao.init();
   },
 
   _registerKeyboard() {
@@ -53,6 +54,7 @@ const NFCePanel = {
     await TEFConfig.carregar();
     await TEFAdm.carregarTransacoes();
     await ImpressoraConfig.carregar();
+    await AtualizacaoVersao.carregar();
   },
 
   // ===== CANCELAMENTO DE NFCe (evento 110111) =====
@@ -1011,6 +1013,123 @@ const ImpressoraConfig = {
 
   _status(texto, erro = false) {
     const el = document.getElementById('imp-status');
+    el.textContent = texto;
+    el.classList.toggle('cfg-status-erro', !!erro);
+  }
+};
+
+/* ========================================================
+   Atualizacao da versao do caixa (aba Atualizacao)
+   Baixa o .zip do link em [atualizacao] url do apoloweb.ini
+   (controle 20 da rotina 8002) e, depois que o operador ve
+   a versao que chegou, troca o exe e reabre o caixa.
+   ======================================================== */
+
+const AtualizacaoVersao = {
+  _baixando: false,
+
+  init() {
+    document.getElementById('btn-atu-baixar')
+      .addEventListener('click', () => this.baixar());
+    document.getElementById('btn-atu-instalar')
+      .addEventListener('click', () => this.instalar());
+  },
+
+  async carregar() {
+    const resp = await Bridge.obterInfoAtualizacao();
+    if (!resp || !resp.sucesso) return;
+
+    const d = resp.dados;
+    document.getElementById('atu-versao-atual').value = d.versaoAtual || '';
+    document.getElementById('atu-url').value = d.url || '';
+    document.getElementById('atu-url-hint').textContent =
+      `Para trocar o link, altere [${d.secaoIni}] url no ${d.arquivoIni}`;
+
+    this._baixando = !!d.baixando;
+    this._botoes(!!d.pronta);
+    if (this._baixando) this._status('Download em andamento...');
+    else if (d.pronta) this._status(`Versao ${d.versaoNova || '?'} baixada, pronta para instalar`);
+    else this._status('');
+  },
+
+  async baixar() {
+    if (this._baixando) return;
+    const resp = await POS._executarComAutorizacao(aut => Bridge.baixarAtualizacao(aut));
+    if (!resp) return;
+    if (!resp.sucesso) {
+      if (!(resp.dados && resp.dados.requerAutorizacao))
+        this._status(resp.mensagem || 'Falha ao iniciar o download', true);
+      return;
+    }
+
+    this._baixando = true;
+    this._botoes(false);
+    this._barra(0);
+    this._status('Conectando ao servidor da nova versao...');
+  },
+
+  onProgresso(data) {
+    const mb = v => (v / 1048576).toFixed(1).replace('.', ',');
+    if (data.total > 0) {
+      this._barra(data.baixado * 100 / data.total);
+      this._status(`Baixando... ${mb(data.baixado)} de ${mb(data.total)} MB`);
+    } else {
+      this._barra(null);
+      this._status(`Baixando... ${mb(data.baixado)} MB`);
+    }
+  },
+
+  onResultado(data) {
+    this._baixando = false;
+    document.getElementById('atu-progresso').classList.add('hidden');
+
+    if (!data.sucesso) {
+      this._botoes(false);
+      this._status(data.erro || 'Falha ao baixar a nova versao', true);
+      Toast.error('Atualizacao nao baixada');
+      return;
+    }
+
+    this._botoes(true);
+    const igual = data.versaoNova && data.versaoNova === data.versaoAtual;
+    this._status(igual
+      ? `A versao baixada (${data.versaoNova}) e' a mesma instalada`
+      : `Versao ${data.versaoNova || '?'} baixada (instalada: ${data.versaoAtual}). ` +
+        'Clique em Instalar e Reiniciar.');
+    Toast.success('Nova versao baixada');
+  },
+
+  async instalar() {
+    const ok = await Dialog.confirm('Instalar nova versao',
+      'O caixa vai fechar, trocar o ApoloWeb.exe e abrir de novo sozinho. Continuar?');
+    if (!ok) return;
+
+    this._status('Instalando...');
+    const resp = await Bridge.instalarAtualizacao();
+    if (resp && resp.sucesso) {
+      this._status(resp.mensagem);
+      Toast.show(resp.mensagem, 'success', 8000);
+    } else {
+      this._status(resp ? resp.mensagem : 'Falha na comunicacao com o PDV', true);
+    }
+  },
+
+  _botoes(pronta) {
+    document.getElementById('btn-atu-baixar').disabled = this._baixando;
+    document.getElementById('btn-atu-instalar').classList.toggle('hidden', !pronta);
+  },
+
+  // pct = null: tamanho desconhecido, barra em movimento continuo
+  _barra(pct) {
+    const box = document.getElementById('atu-progresso');
+    const barra = document.getElementById('atu-barra');
+    box.classList.remove('hidden');
+    box.classList.toggle('atu-indeterminado', pct === null);
+    barra.style.width = pct === null ? '' : Math.min(100, Math.max(0, pct)) + '%';
+  },
+
+  _status(texto, erro = false) {
+    const el = document.getElementById('atu-status');
     el.textContent = texto;
     el.classList.toggle('cfg-status-erro', !!erro);
   }

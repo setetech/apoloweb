@@ -39,6 +39,7 @@ type
     FEscPosModelo: string;
     FEscPosPorta: string;
     FEscPosColunas: Integer;
+    FLarguraBobina: Integer;
     FPosPrinter: TACBrPosPrinter;
     FDANFeESCPOS: TACBrNFeDANFeESCPOS;
 
@@ -87,6 +88,7 @@ type
     property EscPosModelo: string read FEscPosModelo;
     property EscPosPorta: string read FEscPosPorta;
     property EscPosColunas: Integer read FEscPosColunas;
+    property LarguraBobina: Integer read FLarguraBobina;
     property PosPrinter: TACBrPosPrinter read FPosPrinter;
   end;
 
@@ -98,7 +100,19 @@ implementation
 {$R *.dfm}
 
 uses
-  Winapi.Windows, System.Win.Registry, System.TypInfo, Vcl.Dialogs, uFrmConfigConexao;
+  Winapi.Windows, System.Win.Registry, System.TypInfo, Vcl.Dialogs, uFrmConfigConexao,
+  uSyncLog;
+
+// Largura (mm) da pagina do PDF do DANFCe. O FPDF do ACBr usa 80mm com margem
+// fixa de 2mm e ignora MargemEsquerda/Direita; a termica de 80mm so imprime
+// ~72mm e o driver informa 80mm de area util, entao nem o fit do Sumatra
+// reduzia - a borda direita saia cortada ('Valor a Pagar' truncado).
+function LerLarguraBobina(AIni: TIniFile): Integer;
+begin
+  Result := AIni.ReadInteger('impressao','largura_bobina', 72);
+  if (Result < 40) or (Result > 80) then
+    Result := 72;
+end;
 
 // =========================================================================
 // LIFECYCLE
@@ -447,6 +461,7 @@ begin
     FEscPosModelo    := ini.ReadString('impressao','escpos_modelo','ppEscPosEpson');
     FEscPosPorta     := ini.ReadString('impressao','escpos_porta','');
     FEscPosColunas   := ini.ReadInteger('impressao','escpos_colunas', 48);
+    FLarguraBobina   := LerLarguraBobina(ini);
   finally
     ini.Free;
   end;
@@ -469,6 +484,9 @@ begin
     FPosPrinter := TACBrPosPrinter.Create(Self);
     FDANFeESCPOS := TACBrNFeDANFeESCPOS.Create(Self);
     FDANFeESCPOS.PosPrinter := FPosPrinter;
+    // Sem a linha padrao 'Projeto ACBr - www.projetoacbr.com.br' no rodape
+    FDANFeESCPOS.Sistema := '';
+    FDANFeESCPOS.Site := '';
   end;
 
   // O ACBrDevice RECUSA trocar de porta com o device ativo (SetPorta levanta
@@ -538,8 +556,11 @@ begin
 
   // DANFCe
   ACBrNFe.DANFE := ACBrNFeDANFCe;
+  // Sem a linha padrao 'Projeto ACBr - www.projetoacbr.com.br' no rodape
+  ACBrNFeDANFCe.Sistema := '';
   ACBrNFeDANFCe.PathPDF:=PASTA_NFCE+'PDF\';
   ForceDirectories(ACBrNFeDANFCe.PathPDF);
+  ACBrNFeDANFCe.LarguraBobina := FLarguraBobina;
 
   // Logo (TACBrNFCeDANFeFPDF exige PNG)
   if FileExists(ARQUIVO_LOGO) then
@@ -580,10 +601,12 @@ begin
     FEscPosModelo    := ini.ReadString('impressao','escpos_modelo','ppEscPosEpson');
     FEscPosPorta     := ini.ReadString('impressao','escpos_porta','');
     FEscPosColunas   := ini.ReadInteger('impressao','escpos_colunas', 48);
+    FLarguraBobina   := LerLarguraBobina(ini);
   finally
     ini.Free;
   end;
 
+  ACBrNFeDANFCe.LarguraBobina := FLarguraBobina;
   if ImpressaoEscPos then
     ConfigurarImpressaoCupom
   else
@@ -591,13 +614,19 @@ begin
 end;
 
 // Reaplica no ACBr o certificado e os dados fiscais do cache SQLite. Chamado
-// depois que a carga geral rebaixa o PFX que estava faltando em disco - sem
-// isso o ACBr continuaria com ArquivoPFX vazio (app iniciado sem certificado).
+// depois que a carga geral rebaixa o PFX (ausente, vencido ou renovado).
 procedure TDmApoloWeb.RecarregarConfiguracaoNFCe;
 var
   LParams: TParametrosFilial;
 begin
   if not FileExists(ARQUIVO_CERTIFICADO) then Exit;
+
+  // Reatribuir o MESMO caminho nao recarrega nada: o ACBr ignora o valor igual
+  // e, depois da primeira leitura, assina com os bytes que guardou em memoria
+  // (SSL.DadosPFX) - o PFX novo em disco so valeria ao reiniciar o caixa.
+  // Zerar o caminho antes forca descarregar e reler o arquivo.
+  ACBrNFe.SSL.DescarregarCertificado;
+  ACBrNFe.Configuracoes.Certificados.ArquivoPFX := '';
 
   LParams := Default(TParametrosFilial);
   LParams.CodFilial := FCodFilial;
@@ -607,6 +636,18 @@ begin
   LParams.AmbienteNFe := FSQLiteDB.ObterEstado('AMBIENTE_NFE', '2');
   LParams.UFWebService := FSQLiteDB.ObterEstado('UF_WEBSERVICE', 'SP');
   ConfigurarACBrNFCe(LParams);
+
+  // Carrega ja para confirmar no log qual certificado o caixa vai usar. Se
+  // falhar, o ACBr tenta de novo na proxima NFCe e o erro aparece la
+  try
+    ACBrNFe.SSL.CarregarCertificado;
+    SyncLog('certificado: ACBr recarregado - %s, valido ate %s',
+      [ACBrNFe.SSL.CertRazaoSocial,
+       FormatDateTime('dd/mm/yyyy hh:nn', ACBrNFe.SSL.CertDataVenc)]);
+  except
+    on E: Exception do
+      SyncLog('certificado: ERRO ao recarregar no ACBr - %s', [E.Message]);
+  end;
 end;
 
 // =========================================================================

@@ -359,6 +359,7 @@ begin
     // Dropar tabelas com schema antigo/corrompido para recriar
     ExecutarSQL('DROP TABLE IF EXISTS cupom_pagamentos');
     ExecutarSQL('DROP TABLE IF EXISTS cupom_itens');
+    ExecutarSQL('DROP TABLE IF EXISTS cancelamento_erp');
     ExecutarSQL('DROP TABLE IF EXISTS cupons');
     ExecutarSQL('DROP TABLE IF EXISTS nfce_contingencia');
     ExecutarSQL('DROP TABLE IF EXISTS numerario');
@@ -394,6 +395,19 @@ begin
     InserirDadosTeste;
     AtualizarVersaoSchema(SCHEMA_VERSION);
   end;
+
+  // Cancelamentos de NFC-e que ainda tem de cancelar a nota no ERP (ver
+  // TSincronizador.CancelarNotasNoErp). Tabela propria e fora do versionamento
+  // pelo mesmo motivo abaixo; so entra cancelamento feito a partir desta versao.
+  ExecutarSQL(
+    'CREATE TABLE IF NOT EXISTS cancelamento_erp (' +
+    '  cupom_id INTEGER PRIMARY KEY,' +
+    '  situacao INTEGER DEFAULT 0,' +      // 0 = a fazer, 1 = resolvido
+    '  tentativas INTEGER DEFAULT 0,' +
+    '  dthr_tentativa TEXT,' +
+    '  mensagem TEXT' +
+    ')'
+  );
 
   // Correcao de dados, depois das tabelas existirem. Fica fora do
   // versionamento de proposito: subir SCHEMA_VERSION dispara o rebuild acima,
@@ -1331,6 +1345,7 @@ begin
   ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 6)');  // Fechar caixa
   ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 7)');
   ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 18)'); // Sangria
+  ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 20)'); // Atualizar versao do caixa
   ExecutarSQL('INSERT INTO permissoes (matricula, codcontrole) VALUES (1, 99)');
 
   // === EMPRESA ===

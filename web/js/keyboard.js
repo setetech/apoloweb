@@ -170,6 +170,11 @@ const Dialog = {
       document.getElementById('dialog-title').textContent = title;
       document.getElementById('dialog-message').textContent = message;
 
+      // Alternador R$/% so' aparece via promptDesconto
+      this._desc = null;
+      document.getElementById('dialog-desc-tipo').classList.add('hidden');
+      document.getElementById('dialog-desc-preview').classList.add('hidden');
+
       const inputGroup = document.getElementById('dialog-input-group');
       const input = document.getElementById('dialog-input');
 
@@ -205,6 +210,70 @@ const Dialog = {
     return this.prompt(title, message);
   },
 
+  // Desconto em R$ ou % sobre 'base' (total do cupom ou valor bruto do item).
+  // O % e' convertido aqui em R$ (2 casas), entao quem chama recebe sempre o
+  // valor em reais: { valor, percentual (null se digitado em R$), tipo }.
+  // Teclas: '%' muda para percentual, '$' volta para valor. null = cancelado.
+  async promptDesconto(title, message, base) {
+    const pending = this.prompt(title, message, 'Valor (R$)', '0,00');
+    this._desc = { base: Math.max(0, Number(base) || 0), tipo: 'valor' };
+    document.getElementById('dialog-desc-tipo').classList.remove('hidden');
+    document.getElementById('dialog-desc-preview').classList.remove('hidden');
+    this._setTipoDesconto('valor');
+
+    const entrada = await pending;
+    if (entrada === null || entrada === undefined) return null;
+
+    const informado = Utils.parseMoney(String(entrada));
+    const base2 = this._descBase;
+    const percentual = this._descTipoFinal === 'percentual';
+    return {
+      tipo: this._descTipoFinal,
+      percentual: percentual ? informado : null,
+      valor: percentual ? Utils.round2(base2 * informado / 100) : informado
+    };
+  },
+
+  _setTipoDesconto(tipo) {
+    if (!this._desc) return;
+    this._desc.tipo = tipo;
+    document.querySelectorAll('#dialog-desc-tipo button').forEach(b =>
+      b.classList.toggle('ativo', b.dataset.tipo === tipo));
+    document.getElementById('dialog-input-label').textContent =
+      tipo === 'percentual' ? 'Percentual (%)' : 'Valor (R$)';
+    this._atualizarPreviewDesconto();
+  },
+
+  // Mostra ao vivo a equivalencia: % -> R$ ou R$ -> %, sobre a base
+  _atualizarPreviewDesconto() {
+    if (!this._desc) return;
+    const el = document.getElementById('dialog-desc-preview');
+    const { base, tipo } = this._desc;
+    const informado = Utils.parseMoney(document.getElementById('dialog-input').value);
+    const sobre = ' sobre ' + Utils.formatCurrency(base);
+    let erro = false;
+    let texto;
+
+    if (tipo === 'percentual') {
+      const valor = Utils.round2(base * informado / 100);
+      erro = informado > 100;
+      texto = erro ? 'Percentual maximo: 100%'
+        : '= <strong>' + Utils.formatCurrency(valor) + '</strong>' + sobre;
+    } else {
+      erro = informado > base;
+      const perc = base > 0 ? informado / base * 100 : 0;
+      texto = erro ? 'Desconto maior que' + sobre.replace(' sobre', '')
+        : '= <strong>' + Utils.formatMoney(perc) + '%</strong>' + sobre;
+    }
+
+    el.innerHTML = texto;
+    el.classList.toggle('erro', erro);
+  },
+
+  _desc: null,
+  _descBase: 0,
+  _descTipoFinal: 'valor',
+
   _init() {
     // Capturar e limpar _resolve ANTES do Modal.close: o close tambem resolve
     // a Promise (fallback do ESC), e se ele rodar primeiro entrega null - todo
@@ -213,6 +282,9 @@ const Dialog = {
       const input = document.getElementById('dialog-input');
       const inputGroup = document.getElementById('dialog-input-group');
       const value = inputGroup.classList.contains('hidden') ? true : input.value;
+      // Guarda o modo R$/% escolhido antes do close (promptDesconto le' depois)
+      this._descTipoFinal = this._desc ? this._desc.tipo : 'valor';
+      this._descBase = this._desc ? this._desc.base : 0;
       const resolver = this._resolve;
       this._resolve = null;
       Modal.close('modal-dialog');
@@ -226,8 +298,24 @@ const Dialog = {
       if (resolver) resolver(null);
     });
 
+    document.querySelectorAll('#dialog-desc-tipo button').forEach(b =>
+      b.addEventListener('click', () => {
+        this._setTipoDesconto(b.dataset.tipo);
+        document.getElementById('dialog-input').focus();
+      }));
+
+    // Preview do desconto: setTimeout para ler o valor ja' mascarado
+    document.getElementById('dialog-input').addEventListener('input', () => {
+      if (this._desc) setTimeout(() => this._atualizarPreviewDesconto(), 0);
+    });
+
     // Enter no input do dialog
     document.getElementById('dialog-input').addEventListener('keydown', (e) => {
+      if (this._desc && (e.key === '%' || e.key === '$')) {
+        e.preventDefault();
+        this._setTipoDesconto(e.key === '%' ? 'percentual' : 'valor');
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
         // stopPropagation e' obrigatorio: o clique em OK ja tirou o dialog da

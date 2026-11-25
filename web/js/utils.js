@@ -20,6 +20,11 @@ const Utils = {
     return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
   },
 
+  // Arredonda a 2 casas (EPSILON evita 1.005 -> 1.00 por erro de ponto flutuante)
+  round2(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  },
+
   // Formatar data dd/mm/yyyy
   formatDate(dateStr) {
     if (!dateStr) return '';

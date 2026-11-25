@@ -445,10 +445,22 @@ const POS = {
   // Desconto no TOTAL da venda (controle 3 da rotina 8002)
   async solicitarDesconto() {
     if (this.estado !== 'registrando' && this.estado !== 'pagamento') return;
-    const valor = await Dialog.prompt('Desconto', 'Informe o valor do desconto:', 'Valor (R$)', '0,00');
-    if (valor) {
+
+    // Base do % = subtotal liquido dos itens (mesma base do backend)
+    const resumo = await Bridge.obterResumoCupom();
+    const base = resumo && resumo.sucesso
+      ? Utils.round2(resumo.dados.subtotal - resumo.dados.descontoItens) : 0;
+
+    const desc = await Dialog.promptDesconto('Desconto',
+      'Informe o desconto em R$ ou % (tecle % ou $ para alternar):', base);
+    if (desc) {
+      if (desc.percentual !== null && !(desc.percentual > 0 && desc.percentual <= 100)) {
+        Toast.error('Percentual invalido (de 0,01% a 100%)');
+        return;
+      }
+      // % ja' convertido em R$ pelo dialogo: o backend recebe sempre valor
       const resp = await this._executarComAutorizacao(aut =>
-        Bridge.aplicarDesconto(Utils.parseMoney(valor), 'valor', aut));
+        Bridge.aplicarDesconto(desc.valor, 'valor', aut));
       if (resp && resp.sucesso) {
         Toast.success('Desconto aplicado');
         this.atualizarResumo();
@@ -480,18 +492,20 @@ const POS = {
     const item = this.itens.find(i => i.seq === seq) || this._descricaoItemGrid(seq);
     const titulo = item ? Utils.truncate(item.descricao, 30) : 'Item ' + seq;
 
-    const entrada = await Dialog.prompt('Desconto - ' + titulo,
-      'Desconto em R$ ou % (ex: 2,50 ou 10%). Zero remove:', 'Desconto', '', false);
-    if (!entrada) return;
+    const desc = await Dialog.promptDesconto('Desconto - ' + titulo,
+      'Desconto em R$ ou % (tecle % ou $ para alternar). Zero remove:',
+      this._valorBrutoItem(seq));
+    if (!desc) return;
 
-    const bruto = String(entrada).trim();
-    const percentual = bruto.endsWith('%');
-    const valor = Utils.parseMoney(percentual ? bruto.slice(0, -1).trim() : bruto);
+    if (isNaN(desc.valor) || desc.valor < 0 ||
+        (desc.percentual !== null && desc.percentual > 100)) {
+      Toast.error('Desconto invalido');
+      return;
+    }
 
-    if (isNaN(valor) || valor < 0) { Toast.error('Desconto invalido'); return; }
-
+    // % ja' convertido em R$ pelo dialogo (o limite maxperdesc segue no backend)
     const resp = await this._executarComAutorizacao(aut =>
-      Bridge.aplicarDescontoItem(seq, valor, percentual ? 'percentual' : 'valor', aut));
+      Bridge.aplicarDescontoItem(seq, desc.valor, 'valor', aut));
     if (resp && resp.sucesso) {
       Toast.success(resp.mensagem);
       await this.recarregarItens();
@@ -506,6 +520,21 @@ const POS = {
     if (!tr) return null;
     const td = tr.querySelector('.col-desc');
     return td ? { descricao: td.textContent } : null;
+  },
+
+  // Valor bruto do item (base do desconto em %): liquido + desconto ja' dado.
+  // Lido de this.itens ou, se ainda nao recarregado, da linha da grid.
+  _valorBrutoItem(seq) {
+    const item = this.itens.find(i => i.seq === seq);
+    if (item && item.valorBruto !== undefined) return item.valorBruto;
+
+    const tr = document.getElementById('item-' + seq);
+    if (!tr) return 0;
+    const cel = sel => {
+      const td = tr.querySelector(sel);
+      return td ? Utils.parseMoney(td.textContent.replace('-', '')) : 0;
+    };
+    return Utils.round2(cel('.col-total') + cel('.col-descv'));
   },
 
   abrirPagamento() {

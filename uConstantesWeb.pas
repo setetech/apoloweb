@@ -51,6 +51,7 @@ const
   PA_CONSULTAR_PRODUTO        = 17;
   PA_EFETUAR_SANGRIA          = 18;
   PA_ALTERAR_PRECO            = 19;
+  PA_ATUALIZAR_VERSAO         = 20;  // Atualizar Versao do Caixa
 
   // Estados do caixa - DEVEM espelhar Ord(TEstadoCaixa) de uTypesApoloWeb
   // (ecFechado=0, ecLivre=1, ecRegistrando=2, ecPagamento=3), pois KEY_ESTADO
@@ -153,6 +154,10 @@ function LocalizarXmlNFCe(const AChave: string): string;
 // Cai em VERSAO_SISTEMA quando o executavel nao tem VERSIONINFO.
 function VersaoExecutavel: string;
 
+// Mesma leitura para um exe qualquer (a nova versao baixada pela aba
+// Atualizacao). Retorna '' quando o arquivo nao tem VERSIONINFO.
+function VersaoArquivo(const AArquivo: string): string;
+
 // NCM com 8 digitos, zeros a esquerda inclusive. Na retaguarda a coluna e'
 // numerica em parte dos cadastros, entao a mesma NCM aparece como '04029900'
 // e como '4029900' - sem normalizar, a regra de IBS/CBS do produto nao e'
@@ -237,23 +242,28 @@ begin
 end;
 
 function VersaoExecutavel: string;
+begin
+  Result := VersaoArquivo(ParamStr(0));
+  if Result = '' then
+    Result := VERSAO_SISTEMA;
+end;
+
+function VersaoArquivo(const AArquivo: string): string;
 var
-  LArq: string;
   LTam, LHandle: DWORD;
   LBuf: TBytes;
   LPtr: Pointer;
   LLen: UINT;
   LInfo: PVSFixedFileInfo;
 begin
-  Result := VERSAO_SISTEMA;
+  Result := '';
   try
-    LArq := ParamStr(0);
     LHandle := 0;
-    LTam := GetFileVersionInfoSize(PChar(LArq), LHandle);
+    LTam := GetFileVersionInfoSize(PChar(AArquivo), LHandle);
     if LTam = 0 then Exit;
 
     SetLength(LBuf, LTam);
-    if not GetFileVersionInfo(PChar(LArq), 0, LTam, Pointer(LBuf)) then Exit;
+    if not GetFileVersionInfo(PChar(AArquivo), 0, LTam, Pointer(LBuf)) then Exit;
     if not VerQueryValue(Pointer(LBuf), '\', LPtr, LLen) then Exit;
     if LLen < SizeOf(TVSFixedFileInfo) then Exit;
 
@@ -262,7 +272,7 @@ begin
       HiWord(LInfo.dwFileVersionMS), LoWord(LInfo.dwFileVersionMS),
       HiWord(LInfo.dwFileVersionLS), LoWord(LInfo.dwFileVersionLS)]);
   except
-    Result := VERSAO_SISTEMA;
+    Result := '';
   end;
 end;
 

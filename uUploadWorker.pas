@@ -323,6 +323,7 @@ begin
           // para uma venda cancelada depois de ja ter subido. O sweep e' barato
           // e faz o cancelamento chegar na hora.
           FSincronizador.UploadCancelamentos(FConn);
+          FSincronizador.CancelarNotasNoErp(FConn);
         end;
       tuDocEletronico:
         FSincronizador.UploadDocEletronico(FConn, AJob.CupomId);

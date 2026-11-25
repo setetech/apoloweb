@@ -59,6 +59,8 @@ type
 
     // Upload SQLite -> Oracle
     procedure EnviarVendasPendentes(AConn: TUniConnection);
+    procedure ReabrirVendasEnviadasAbertas;
+    function VendaIncompletaNoOracle(AConn: TUniConnection; ANumTrans: Int64): Boolean;
     // Preenche a chavenfe na msapolo_venda depois que a NFCe e' autorizada:
     // a venda sobe antes de a nota existir, e sem isso a MSNF sai sem numero
     procedure AtualizarChavesNoOracle(AConn: TUniConnection);
@@ -66,6 +68,10 @@ type
     procedure EnviarNumerarioPendente(AConn: TUniConnection);
     function CodCobERP(const ACodCobPdv: string; ACodTipoTransacao: Integer): string;
     function MontarXmlCupom(ACupomId: Integer;NumTrans:Double): string;
+    procedure TravarVendaNoOracle(AConn: TUniConnection; ANumTransVenda: Int64;
+      const AChave: string);
+    function CancelarNotaNoErp(AConn: TUniConnection; ACupom: TUniQuery;
+      out AResolvido: Boolean): string;
 
     procedure RegistrarLog(const ATabela, AOperacao, ARegistroId, AStatus: string;
       const AErro: string = '');
@@ -85,6 +91,13 @@ type
     // do zero; senao produtos e incremental via versaoreg quando possivel.
     procedure DownloadCompleto(AConn: TUniConnection; AForcarFull: Boolean = False);
 
+    // Ciclo inteiro de download numa conexao propria (chamado em thread):
+    // conecta, consulta PrecisaSincronizar (se AVerificar), baixa e carimba
+    // data_atualizacao_caixa. Loga inicio, tempo de cada passo e erros com
+    // a origem (F5, abertura, automatica). Nunca lanca excecao.
+    procedure ExecutarSincronizacao(const AConnStr, AOrigem: string;
+      AForcarFull, AVerificar: Boolean);
+
     // Upload de vendas (apos cada venda)
     procedure UploadVenda(AConn: TUniConnection; ACupomId: Integer);
 
@@ -97,6 +110,10 @@ type
     // imediato do cancelamento quanto para o ciclo de retry.
     procedure UploadCancelamentos(AConn: TUniConnection);
 
+    // Cancela no ERP (MSNF, estoque, cobranca) a nota que o job ja tinha
+    // gerado da venda cancelada. Depois do UploadCancelamentos.
+    procedure CancelarNotasNoErp(AConn: TUniConnection);
+
     // Sincronizacao pendente
     procedure ProcessarPendentes(AConn: TUniConnection);
 
@@ -105,13 +122,16 @@ type
     procedure PararRetry;
 
     property Sincronizando: Boolean read FSincronizando;
-    // True quando a carga precisou rebaixar o certificado (arquivo ausente)
+    // True quando a carga rebaixou o certificado (ausente, vencido ou diferente do Oracle)
     property CertificadoRenovado: Boolean read FCertificadoRenovado;
     // Assinado pelo form principal: dispara ProcessarPendentes com a conexao
     property OnRetry: TNotifyEvent read FOnRetry write FOnRetry;
   end;
 
 implementation
+
+uses
+  ACBrDFeSSL, uDocEletronicoNF, uCancelamentoNF;
 
 const
   // Sem o carimbo data_atualizacao_servidor nao ha como saber se algo mudou;
@@ -127,6 +147,18 @@ begin
   AQuery.ReadOnly := True;
   AQuery.UniDirectional := True;
   AQuery.FetchRows := 2000;
+end;
+
+{ Progresso dos loops grandes de download: sem isto uma tabela lenta no link
+  do cliente ficava minutos sem nenhuma linha no log (21/10, REALLOUCAS) e
+  nao dava para saber se o SELECT travou ou se o fetch estava andando. }
+const
+  LOG_PROGRESSO_A_CADA = 5000;
+
+procedure LogProgresso(const AEtapa: string; AQtd: Integer; const ASw: TStopwatch);
+begin
+  if (AQtd > 0) and (AQtd mod LOG_PROGRESSO_A_CADA = 0) then
+    SyncLog('    %s: %d regs lidos em %d ms', [AEtapa, AQtd, ASw.ElapsedMilliseconds]);
 end;
 
 { TSincronizador }
@@ -254,7 +286,16 @@ begin
       'SELECT data_atualizacao_servidor, data_atualizacao_caixa ' +
       'FROM msapolo_caixa WHERE numseriehd = :numseriehd';
     LQuery.ParamByName('numseriehd').AsString := FSQLite.ObterEstado(KEY_HD_SERIAL, '');
-    LQuery.Open;
+    try
+      LQuery.Open;
+    except
+      on E: Exception do
+      begin
+        SyncLog('PrecisaSincronizar: ERRO na consulta msapolo_caixa em %d ms - %s',
+          [LSw.ElapsedMilliseconds, E.Message]);
+        raise;
+      end;
+    end;
 
     if not LQuery.IsEmpty then
     begin
@@ -336,6 +377,8 @@ procedure TSincronizador.ExecutarEtapa(const ANome: string; AAcao: TProc);
 var
   LSw: TStopwatch;
 begin
+  // Linha de inicio: se a etapa travar, o log mostra onde parou e desde quando
+  SyncLog('  %-16s ...   inicio', [ANome]);
   LSw := TStopwatch.StartNew;
   try
     AAcao();
@@ -343,9 +386,54 @@ begin
   except
     on E: Exception do
     begin
-      SyncLog('  %-16s ERRO  em %6d ms - %s', [ANome, LSw.ElapsedMilliseconds, E.Message]);
+      SyncLog('  %-16s ERRO  em %6d ms - [%s] %s',
+        [ANome, LSw.ElapsedMilliseconds, E.ClassName, E.Message]);
       raise;
     end;
+  end;
+end;
+
+procedure TSincronizador.ExecutarSincronizacao(const AConnStr, AOrigem: string;
+  AForcarFull, AVerificar: Boolean);
+var
+  LConn: TUniConnection;
+  LSw, LSwPasso: TStopwatch;
+  LPasso: string;
+begin
+  LSw := TStopwatch.StartNew;
+  LPasso := 'conectando Oracle';
+  try
+    LConn := TUniConnection.Create(nil);
+    try
+      LConn.ConnectString := AConnStr;
+      LConn.LoginPrompt := False;
+      SyncLog('SYNC %s: conectando Oracle (%s)', [AOrigem, LConn.Server]);
+      LSwPasso := TStopwatch.StartNew;
+      LConn.Connect;
+      SyncLog('SYNC %s: Oracle conectado em %d ms', [AOrigem, LSwPasso.ElapsedMilliseconds]);
+      try
+        LPasso := 'PrecisaSincronizar';
+        if (not AVerificar) or PrecisaSincronizar(LConn) then
+        begin
+          LPasso := 'download';
+          DownloadCompleto(LConn, AForcarFull);
+          LPasso := 'AtualizarDataSincCaixa';
+          LSwPasso := TStopwatch.StartNew;
+          AtualizarDataSincCaixa(LConn);
+          SyncLog('SYNC %s: AtualizarDataSincCaixa em %d ms',
+            [AOrigem, LSwPasso.ElapsedMilliseconds]);
+          SyncLog('SYNC %s: fim em %d ms', [AOrigem, LSw.ElapsedMilliseconds]);
+        end;
+      finally
+        LConn.Disconnect;
+      end;
+    finally
+      LConn.Free;
+    end;
+  except
+    on E: Exception do
+      SyncLog('SYNC %s: ERRO em "%s" apos %d ms - [%s] %s',
+        [AOrigem, LPasso, LSw.ElapsedMilliseconds, E.ClassName, E.Message]);
   end;
 end;
 
@@ -353,7 +441,11 @@ procedure TSincronizador.DownloadCompleto(AConn: TUniConnection; AForcarFull: Bo
 var
   LSw: TStopwatch;
 begin
-  if FSincronizando then Exit;
+  if FSincronizando then
+  begin
+    SyncLog('=== DOWNLOAD COMPLETO: ignorado - outra sincronizacao em andamento ===');
+    Exit;
+  end;
   FSincronizando := True;
   FCertificadoRenovado := False;
   LSw := TStopwatch.StartNew;
@@ -438,6 +530,8 @@ begin
   LTemQtUnit := OracleTemColuna(AConn, 'msapolo_produtos', 'qtunit');
   LTemQtUnitTemp := (not LTemQtUnit) and
     OracleTemColuna(AConn, 'msapolo_produto_temp', 'qtunit');
+  SyncLog('    produtos: checagem da coluna qtunit (all_tab_columns) em %d ms',
+    [LSw.ElapsedMilliseconds]);
   LJoinQtUnit := '';
   if LTemQtUnit then
     LExprQtUnit := 'p.qtunit'
@@ -490,8 +584,12 @@ begin
     LQuery.ParamByName('codfilial').AsString := FSQLite.ObterEstado(KEY_CODFILIAL, '');
     if LIncremental then
       LQuery.ParamByName('versao').AsString := LUltimaVersao;
+    SyncLog('    produtos (%s, filial %s): SELECT enviado ao Oracle',
+      [IfThen(LIncremental, 'incremental desde ' + LUltimaVersao, 'full'),
+       LQuery.ParamByName('codfilial').AsString]);
     LQuery.Open;
     LMsOpen := LSw.ElapsedMilliseconds; // execucao no Oracle + 1o bloco de fetch
+    SyncLog('    produtos: Oracle respondeu o SELECT em %d ms - lendo registros', [LMsOpen]);
 
     // Usar transacao para performance
     FSQLite.ExecutarSQL('BEGIN TRANSACTION');
@@ -601,6 +699,7 @@ begin
           ]
         );
         Inc(LQtd);
+        LogProgresso('produtos', LQtd, LSw);
         LQuery.Next;
       end;
       finally
@@ -644,8 +743,11 @@ begin
         'ELSE TO_CHAR(MAX(versaoreg), ''YYYY-MM-DD HH24:MI:SS'') END ' +
         'FROM msapolo_produtos WHERE codfilial = :codfilial';
       LQuery.ParamByName('codfilial').AsString := FSQLite.ObterEstado(KEY_CODFILIAL, '');
+      LMsOpen := LSw.ElapsedMilliseconds;
       LQuery.Open;
       LMaxVersao := LQuery.Fields[0].AsString;
+      SyncLog('    produtos: MAX(versaoreg) = %s em %d ms',
+        [LMaxVersao, LSw.ElapsedMilliseconds - LMsOpen]);
       if LMaxVersao <> '' then
         FSQLite.SalvarEstado(KEY_PRODUTOS_VERSAOREG, LMaxVersao);
     finally
@@ -661,7 +763,12 @@ end;
 procedure TSincronizador.SincronizarCodBarras(AConn: TUniConnection);
 var
   LQuery: TUniQuery;
+  LSw: TStopwatch;
+  LQtd: Integer;
+  LMsOpen, LMsLoop: Int64;
 begin
+  LSw := TStopwatch.StartNew;
+  LQtd := 0;
   LQuery := TUniQuery.Create(nil);
   try
     LQuery.Connection := AConn;
@@ -673,10 +780,15 @@ begin
     except
       on E: Exception do
       begin
+        // Etapa segue como OK para nao abortar o download, mas o motivo
+        // precisa aparecer no arquivo, nao so na sync_log do SQLite
+        SyncLog('    codbarras: ERRO no SELECT mscodbarra em %d ms (etapa pulada) - %s',
+          [LSw.ElapsedMilliseconds, E.Message]);
         RegistrarLog('codbarras', 'DOWNLOAD', '', 'ERRO', E.Message);
         Exit;
       end;
     end;
+    LMsOpen := LSw.ElapsedMilliseconds;
 
     FSQLite.ExecutarSQL('BEGIN TRANSACTION');
     try
@@ -690,9 +802,14 @@ begin
            LQuery.FieldByName('codprod').AsLargeInt,
            LQuery.FieldByName('descricao').AsString]
         );
+        Inc(LQtd);
+        LogProgresso('codbarras', LQtd, LSw);
         LQuery.Next;
       end;
       FSQLite.ExecutarSQL('COMMIT');
+      LMsLoop := LSw.ElapsedMilliseconds - LMsOpen;
+      SyncLog('    codbarras: SELECT Oracle %d ms | fetch+gravacao SQLite %d ms | %d regs (%d regs/s)',
+        [LMsOpen, LMsLoop, LQtd, Trunc(LQtd / ((LMsLoop + 1) / 1000))]);
       RegistrarLog('codbarras', 'DOWNLOAD', '', 'OK');
     except
       FSQLite.ExecutarSQL('ROLLBACK');
@@ -737,6 +854,7 @@ begin
              LQuery.FieldByName('fax').AsString, LQuery.FieldByName('limcredito').AsFloat]
           );
           Inc(LQtd);
+          LogProgresso('clientes', LQtd, LSw);
           LQuery.Next;
         end;
       finally
@@ -1416,16 +1534,83 @@ begin
   end;
 end;
 
+// Abre o PFX em memoria (instancia propria, sem mexer no ACBrNFe do caixa) so
+// para ler a validade. Senha errada ou arquivo corrompido -> False e AErro.
+function LerValidadePFX(const ADados: AnsiString; const ASenha: string;
+  out AValidade: TDateTime; out AErro: string): Boolean;
+var
+  LSSL: TDFeSSL;
+begin
+  Result := False;
+  AValidade := 0;
+  AErro := '';
+  if ADados = '' then
+  begin
+    AErro := 'PFX vazio';
+    Exit;
+  end;
+
+  LSSL := TDFeSSL.Create;
+  try
+    try
+      LSSL.SSLCryptLib := cryOpenSSL;
+      LSSL.DadosPFX := ADados;
+      LSSL.Senha := AnsiString(ASenha);
+      LSSL.CarregarCertificado;
+      AValidade := LSSL.CertDataVenc;
+      Result := AValidade > 0;
+      if not Result then
+        AErro := 'certificado sem data de validade';
+    except
+      // ACBr devolve a mensagem em varias linhas; o sync log e uma por evento
+      on E: Exception do
+        AErro := StringReplace(E.Message, sLineBreak, ' ', [rfReplaceAll]);
+    end;
+  finally
+    LSSL.Free;
+  end;
+end;
+
+function LerArquivoPFX(const AArquivo: string): AnsiString;
+var
+  LStream: TFileStream;
+begin
+  Result := '';
+  if not FileExists(AArquivo) then Exit;
+  LStream := TFileStream.Create(AArquivo, fmOpenRead or fmShareDenyNone);
+  try
+    SetLength(Result, LStream.Size);
+    if LStream.Size > 0 then
+      LStream.ReadBuffer(Result[1], LStream.Size);
+  finally
+    LStream.Free;
+  end;
+end;
+
+function FormatarValidade(AData: TDateTime): string;
+begin
+  if AData <= 0 then
+    Result := '-'
+  else
+    Result := FormatDateTime('dd/mm/yyyy hh:nn', AData);
+end;
+
 // Certificado digital: o PFX vive em disco (ARQUIVO_CERTIFICADO), extraido do
-// BLOB msfilial.certificado_digital na abertura do app. Se o arquivo sumir
-// (limpeza de disco, restore, troca de maquina) a NFCe para de assinar. A carga
-// geral confere a existencia e rebaixa o certificado quando nao encontra.
+// BLOB msfilial.certificado_digital na abertura do app. A carga geral compara o
+// arquivo com o BLOB e o substitui quando falta, nao abre, esta VENCIDO ou e
+// diferente do Oracle (certificado renovado na retaguarda). Antes so trocava
+// quando o arquivo sumia: um PFX vencido ficava no caixa ate reiniciar o app e
+// toda NFCe caia em contingencia ("Data de Validade do Certificado ja expirou").
 procedure TSincronizador.SincronizarCertificado(AConn: TUniConnection);
 var
   LQuery: TUniQuery;
   LBlobStream: TStream;
   LFileStream: TFileStream;
-  LCodFilial, LSenha: string;
+  LCodFilial, LSenha, LSenhaLocal, LMotivo, LErroLocal, LErroOracle: string;
+  LArqTmp, LArqAnterior: string;
+  LDadosOracle, LDadosLocal: AnsiString;
+  LValLocal, LValOracle: TDateTime;
+  LLocalLido, LOracleLido: Boolean;
 begin
   LCodFilial := FSQLite.ObterEstado(KEY_CODFILIAL, '');
   if LCodFilial = '' then
@@ -1434,12 +1619,8 @@ begin
     Exit;
   end;
 
-  // Arquivo presente e nao vazio: nada a renovar
-  if FileExists(ARQUIVO_CERTIFICADO) and (TFile.GetSize(ARQUIVO_CERTIFICADO) > 0) then
-    Exit;
-
-  SyncLog('  certificado: arquivo ausente/vazio (%s) - rebaixando do Oracle',
-    [ARQUIVO_CERTIFICADO]);
+  LArqTmp := ARQUIVO_CERTIFICADO + '.tmp';
+  LArqAnterior := ARQUIVO_CERTIFICADO + '.anterior';
 
   // Falha aqui nao pode abortar a carga geral: apenas registra no log
   try
@@ -1464,40 +1645,116 @@ begin
       LBlobStream := LQuery.CreateBlobStream(
         LQuery.FieldByName('certificado_digital'), bmRead);
       try
-        if LBlobStream.Size <= 0 then
-        begin
-          SyncLog('  certificado: BLOB com 0 bytes para filial %s', [LCodFilial]);
-          RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'ERRO',
-            'BLOB do certificado vazio');
-          Exit;
-        end;
-
-        ForceDirectories(ExtractFilePath(ARQUIVO_CERTIFICADO));
-        LFileStream := TFileStream.Create(ARQUIVO_CERTIFICADO, fmCreate);
-        try
-          LFileStream.CopyFrom(LBlobStream, LBlobStream.Size);
-        finally
-          LFileStream.Free;
-        end;
-        SyncLog('  certificado: gravado %s (%d bytes)',
-          [ARQUIVO_CERTIFICADO, LBlobStream.Size]);
+        SetLength(LDadosOracle, LBlobStream.Size);
+        if LBlobStream.Size > 0 then
+          LBlobStream.ReadBuffer(LDadosOracle[1], LBlobStream.Size);
       finally
         LBlobStream.Free;
       end;
 
       // A senha do PFX pode ter mudado junto com o certificado
       LSenha := LQuery.FieldByName('senha_certificado').AsString;
-      FSQLite.SalvarEstado('SENHA_CERTIFICADO', LSenha);
-
-      // Sinaliza para o form recarregar o ACBr com o certificado novo
-      FCertificadoRenovado := True;
-      RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'OK');
     finally
       LQuery.Free;
     end;
+
+    if LDadosOracle = '' then
+    begin
+      SyncLog('  certificado: BLOB com 0 bytes para filial %s', [LCodFilial]);
+      RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'ERRO',
+        'BLOB do certificado vazio');
+      Exit;
+    end;
+
+    // Situacao do PFX em disco, aberto com a senha que o ACBr esta usando
+    LDadosLocal := LerArquivoPFX(ARQUIVO_CERTIFICADO);
+    LSenhaLocal := FSQLite.ObterEstado('SENHA_CERTIFICADO', '');
+    LValLocal := 0;
+    LErroLocal := '';
+    LLocalLido := (LDadosLocal <> '') and
+      LerValidadePFX(LDadosLocal, LSenhaLocal, LValLocal, LErroLocal);
+
+    if LDadosLocal = '' then
+      LMotivo := 'arquivo ausente/vazio'
+    else if not LLocalLido then
+      LMotivo := 'PFX local nao abre (' + LErroLocal + ')'
+    else if LValLocal < Now then
+      LMotivo := 'PFX local VENCIDO em ' + FormatarValidade(LValLocal)
+    else if LDadosLocal <> LDadosOracle then
+      LMotivo := 'PFX local difere do msfilial.certificado_digital'
+    else
+      LMotivo := '';
+
+    if LMotivo = '' then
+    begin
+      SyncLog('  certificado: OK - igual ao Oracle, valido ate %s',
+        [FormatarValidade(LValLocal)]);
+      Exit;
+    end;
+
+    LOracleLido := LerValidadePFX(LDadosOracle, LSenha, LValOracle, LErroOracle);
+
+    // Havendo PFX local, o do Oracle so entra se for utilizavel e nao pior:
+    // BLOB com senha errada ou vencido nao pode derrubar um PFX que ainda assina
+    if LDadosLocal <> '' then
+    begin
+      if not LOracleLido then
+      begin
+        SyncLog('  certificado: %s, mas o PFX do Oracle nao abre (%s) - ' +
+          'mantido o local (vence %s)',
+          [LMotivo, LErroOracle, FormatarValidade(LValLocal)]);
+        RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'ERRO',
+          'PFX do Oracle nao abre: ' + LErroOracle);
+        Exit;
+      end;
+      if LLocalLido and (LValOracle < Now) and (LValOracle <= LValLocal) then
+      begin
+        SyncLog('  certificado: %s, mas o PFX do Oracle tambem esta vencido ' +
+          '(%s; local %s) - mantido o local. Atualize msfilial.certificado_digital',
+          [LMotivo, FormatarValidade(LValOracle), FormatarValidade(LValLocal)]);
+        RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'ERRO',
+          'PFX do Oracle vencido em ' + FormatarValidade(LValOracle));
+        Exit;
+      end;
+    end;
+
+    SyncLog('  certificado: %s - rebaixando do Oracle (local vence %s, ' +
+      'Oracle vence %s)',
+      [LMotivo, FormatarValidade(LValLocal), FormatarValidade(LValOracle)]);
+    if not LOracleLido then
+      SyncLog('  certificado: AVISO - PFX do Oracle nao abre (%s); gravado ' +
+        'mesmo assim por falta de arquivo local', [LErroOracle]);
+
+    // Grava ao lado e troca de uma vez, guardando o anterior: se a gravacao
+    // falhar no meio, o PFX em uso continua intacto
+    ForceDirectories(ExtractFilePath(ARQUIVO_CERTIFICADO));
+    LFileStream := TFileStream.Create(LArqTmp, fmCreate);
+    try
+      LFileStream.WriteBuffer(LDadosOracle[1], Length(LDadosOracle));
+    finally
+      LFileStream.Free;
+    end;
+    if FileExists(ARQUIVO_CERTIFICADO) then
+    begin
+      if FileExists(LArqAnterior) then
+        TFile.Delete(LArqAnterior);
+      TFile.Replace(LArqTmp, ARQUIVO_CERTIFICADO, LArqAnterior);
+    end
+    else
+      TFile.Move(LArqTmp, ARQUIVO_CERTIFICADO);
+
+    FSQLite.SalvarEstado('SENHA_CERTIFICADO', LSenha);
+
+    // Sinaliza para o form recarregar o ACBr com o certificado novo
+    FCertificadoRenovado := True;
+    SyncLog('  certificado: gravado %s (%d bytes), valido ate %s',
+      [ARQUIVO_CERTIFICADO, Length(LDadosOracle), FormatarValidade(LValOracle)]);
+    RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'OK');
   except
     on E: Exception do
     begin
+      if FileExists(LArqTmp) then
+        System.SysUtils.DeleteFile(LArqTmp);
       SyncLog('  certificado: ERRO ao rebaixar - %s', [E.Message]);
       RegistrarLog('certificado', 'DOWNLOAD', LCodFilial, 'ERRO', E.Message);
     end;
@@ -1546,6 +1803,64 @@ begin
   Result := LCod;
 end;
 
+const
+  { Cupom encerrado: DoFinalizarVenda e o orcamento gravam dthrfimvenda.
+
+    O cupom ja nasce com codoper 'V' e sincronizado = 0. Sem este filtro o
+    envio de pendentes pegava a venda EM ANDAMENTO (a conexao voltou no meio
+    da venda; o retry entrou na fila com o caixa livre e rodou com outra venda
+    ja aberta): subiam so os itens daquele momento, sem pagamento, o cupom
+    ficava sincronizado = 1 e o envio do fim da venda era ignorado. O ERP
+    gerava a nota sem o resto dos itens e sem financeiro. }
+  SQL_CUPOM_ENCERRADO = '(COALESCE(dthrfimvenda, '''') <> '''')';
+
+{ Cupom enviado ainda aberto por uma versao anterior: subiu antes de terminar
+  (dt_sincronizacao < dthrfimvenda; as duas sao a hora local do caixa). Volta
+  para a fila, e o UploadVenda completa a venda na retaguarda se ela ainda nao
+  virou nota. Se ja virou, so renova a dt_sincronizacao e nao volta aqui. }
+procedure TSincronizador.ReabrirVendasEnviadasAbertas;
+const
+  FILTRO = 'WHERE sincronizado = 1 AND numtrans > 0 AND codoper IN (''V'', ''O'') ' +
+    'AND ' + SQL_CUPOM_ENCERRADO + ' AND dt_sincronizacao < dthrfimvenda';
+var
+  LQtd: Variant;
+begin
+  try
+    // Conta antes: o UPDATE pede o lock de escrita do SQLite mesmo sem linhas
+    LQtd := FSQLite.ExecutarScalar('SELECT COUNT(*) FROM cupons ' + FILTRO);
+    if VarIsNull(LQtd) or (Integer(LQtd) = 0) then Exit;
+
+    FSQLite.ExecutarSQL('UPDATE cupons SET sincronizado = 0 ' + FILTRO);
+    SyncLog('PENDENTES: %d venda(s) enviada(s) com o cupom aberto voltaram para a fila',
+      [Integer(LQtd)]);
+  except
+    // Fica para o proximo ciclo; nao segura o resto da fila
+    on E: Exception do
+      SyncLog('PENDENTES: vendas enviadas abertas - [%s] %s', [E.ClassName, E.Message]);
+  end;
+end;
+
+{ A venda subiu com o cupom aberto (sem dthrfimvenda) e ainda nao virou nota:
+  pode ser completada. }
+function TSincronizador.VendaIncompletaNoOracle(AConn: TUniConnection;
+  ANumTrans: Int64): Boolean;
+var
+  LQ: TUniQuery;
+begin
+  LQ := TUniQuery.Create(nil);
+  try
+    LQ.Connection := AConn;
+    LQ.SQL.Text :=
+      'SELECT COUNT(*) FROM msapolo_venda WHERE numtrans = :numtrans ' +
+      'AND TRIM(dthrfimvenda) IS NULL AND numtrans_erp IS NULL';
+    LQ.ParamByName('numtrans').AsLargeInt := ANumTrans;
+    LQ.Open;
+    Result := LQ.Fields[0].AsInteger > 0;
+  finally
+    LQ.Free;
+  end;
+end;
+
 function TSincronizador.NumTransVendaNoOracle(AConn: TUniConnection;
   ACupom: TUniQuery): Int64;
 var
@@ -1579,6 +1894,7 @@ var
   LSw: TStopwatch;
   LQtdItens, LQtdPagtos: Integer;
   LTemQtUnit, LTemVBCNfe, LTemVICMSNfe: Boolean;
+  LNumTransCompletar: Int64;
 begin
   if not AConn.Connected then Exit;
   LSw := TStopwatch.StartNew;
@@ -1587,10 +1903,11 @@ begin
 
   try
     // Ler cupom do SQLite. sincronizado = 0 evita duplicar em msapolo_venda
-    // quando o upload imediato (fim da venda) e o retry se cruzam.
+    // quando o upload imediato (fim da venda) e o retry se cruzam. Cupom
+    // ainda aberto nao sobe (ver SQL_CUPOM_ENCERRADO).
     LCupom := FSQLite.ExecutarSelect(
       'SELECT * FROM cupons WHERE id = ' + IntToStr(ACupomId) +
-      ' AND sincronizado = 0'
+      ' AND sincronizado = 0 AND ' + SQL_CUPOM_ENCERRADO
     );
     try
       if LCupom.IsEmpty then Exit;
@@ -1602,7 +1919,19 @@ begin
       // ERP que so' aparece na conferencia. Ja estando la, completa a
       // marcacao local e sai.
       LNumTrans := NumTransVendaNoOracle(AConn, LCupom);
-      if LNumTrans > 0 then
+      // Cupom que ja subiu (ReabrirVendasEnviadasAbertas) e nao foi achado pela
+      // chave filial/caixa/cupom/data: nunca inserir outra vez
+      if LNumTrans = 0 then
+        LNumTrans := LCupom.FieldByName('numtrans').AsLargeInt;
+
+      // Enviada ainda aberta (sem dthrfimvenda la) e sem nota no ERP: os itens
+      // e pagamentos da retaguarda sao trocados pelos do cupom encerrado, no
+      // mesmo numtrans (na transacao abaixo).
+      LNumTransCompletar := 0;
+      if (LNumTrans > 0) and VendaIncompletaNoOracle(AConn, LNumTrans) then
+        LNumTransCompletar := LNumTrans;
+
+      if (LNumTrans > 0) and (LNumTransCompletar = 0) then
       begin
         FSQLite.ExecutarSQL(
           'UPDATE cupons SET sincronizado = 1, numtrans = ' + IntToStr(LNumTrans) + ', ' +
@@ -1622,6 +1951,47 @@ begin
         try
           LInsert.Connection := AConn;
 
+          if LNumTransCompletar > 0 then
+          begin
+            // Trava a linha e confere de novo: o job do ERP pode ter acabado
+            // de gerar a nota desta venda
+            LInsert.SQL.Text :=
+              'SELECT numtrans FROM msapolo_venda WHERE numtrans = :numtrans ' +
+              'AND TRIM(dthrfimvenda) IS NULL AND numtrans_erp IS NULL ' +
+              'FOR UPDATE NOWAIT';
+            LInsert.ParamByName('numtrans').AsLargeInt := LNumTransCompletar;
+            LInsert.Open;
+            if LInsert.IsEmpty then
+              raise Exception.Create('a venda mudou na retaguarda durante o envio');
+            LInsert.Close;
+
+            LInsert.SQL.Text := 'DELETE FROM msapolo_venda_item WHERE numtrans = :numtrans';
+            LInsert.ParamByName('numtrans').AsLargeInt := LNumTransCompletar;
+            LInsert.Execute;
+            LInsert.SQL.Text := 'DELETE FROM msapolo_venda_pagto WHERE numtrans = :numtrans';
+            LInsert.ParamByName('numtrans').AsLargeInt := LNumTransCompletar;
+            LInsert.Execute;
+            LNumTrans := LNumTransCompletar;
+
+            // Cabecalho: os mesmos parametros do INSERT abaixo
+            LInsert.SQL.Text :=
+              'UPDATE msapolo_venda SET codfilial = :codfilial, numcaixa = :numcaixa, ' +
+              'numcupom = :numcupom, codoper = :codoper, datamovto = :datamovto, ' +
+              'dthriniciovenda = :dthriniciovenda, dthrfimvenda = :dthrfimvenda, ' +
+              'codoperador = :codoperador, codsupervisor = :codsupervisor, ' +
+              'codcli = :codcli, cpf_cnpj = :cpf_cnpj, descnomecliente = :descnomecliente, ' +
+              'qtdeitens = :qtdeitens, valorvenda = :valorvenda, valordesc = :valordesc, ' +
+              'valorencargo = :valorencargo, valortroco = :valortroco, ' +
+              // a chave/protocolo ja gravados la nunca voltam a vazio
+              'chavenfe = NVL(:chavenfe, chavenfe), ' +
+              'protocolo_nfe = NVL(:protocolo_nfe, protocolo_nfe), ' +
+              'numserieequip = :numserieequip, versao = :versao, ' +
+              'tipo_contingencia = :tipo_contingencia, dt_contingencia = :dt_contingencia, ' +
+              'contingencia_justificativa = :contingencia_justificativa ' +
+              'WHERE numtrans = :numtrans';
+          end
+          else
+          begin
           // Obter proximo numtrans da sequence Oracle
           LInsert.SQL.Text := 'SELECT msapolo_venda_seq.NEXTVAL FROM DUAL';
           LInsert.Open;
@@ -1642,6 +2012,7 @@ begin
             ':qtdeitens, :valorvenda, :valordesc, :valorencargo, :valortroco, ' +
             ':chavenfe, :protocolo_nfe, :numserieequip, :versao, ' +
             ':tipo_contingencia, :dt_contingencia, :contingencia_justificativa)';
+          end;
 
           LInsert.ParamByName('numtrans').AsLargeInt := LNumTrans;
           LInsert.ParamByName('codfilial').AsString := LCupom.FieldByName('codfilial').AsString;
@@ -1818,8 +2189,9 @@ begin
       );
 
       RegistrarLog('cupons', 'UPLOAD', IntToStr(ACupomId), 'OK');
-      SyncLog('UPLOAD venda cupom=%d numtrans=%d: %d itens + %d pagtos em %d ms',
-        [ACupomId, LNumTrans, LQtdItens, LQtdPagtos, LSw.ElapsedMilliseconds]);
+      SyncLog('UPLOAD venda cupom=%d numtrans=%d%s: %d itens + %d pagtos em %d ms',
+        [ACupomId, LNumTrans, IfThen(LNumTransCompletar > 0, ' (completada)', ''),
+        LQtdItens, LQtdPagtos, LSw.ElapsedMilliseconds]);
 
       // Backup da numeracao NFCe junto com a venda (ver EspelharProxNumNota).
       // Falhar aqui nao pode desfazer a venda nem impedir a marcacao acima.
@@ -2006,6 +2378,212 @@ begin
   end;
 end;
 
+{ Cancela no ERP a nota da venda cancelada no PDV. Devolve o motivo quando nao
+  cancelou ('' = cancelada agora); AResolvido = nao ha mais o que tentar.
+
+  A regra e a da uCancelamentoNF, a mesma das rotinas do ERP: devolve estoque,
+  estorna a cobranca e recusa nota com titulo baixado (acerto de caixa ja feito).
+
+  A linha da msapolo_venda fica travada ate o fim: o job MSAPOLO_GERAR_NF
+  tambem a trava, entao ou ele ja gerou a nota (e ela e cancelada aqui) ou vai
+  encontrar a venda com codoper 'C' e recusar. }
+function TSincronizador.CancelarNotaNoErp(AConn: TUniConnection;
+  ACupom: TUniQuery; out AResolvido: Boolean): string;
+const
+  ROTINA_PDV = 8002;
+  // o job sem a trava pode estar no meio da geracao: so da por encerrado sem
+  // nota depois de alguns ciclos dele (5 min)
+  MIN_ESPERA_JOB = 30;
+var
+  LQry: TUniQuery;
+  LChave, LChaveNF: string;
+  LNumTransErp: Int64;
+  LIdMotivo, LMatricula: Integer;
+
+  function SoDigitos(const S: string): string;
+  var
+    C: Char;
+  begin
+    Result := '';
+    for C in S do
+      if CharInSet(C, ['0'..'9']) then
+        Result := Result + C;
+  end;
+
+  function Fim(const AMsg: string; AEncerrado: Boolean): string;
+  begin
+    AConn.Rollback;
+    AResolvido := AEncerrado;
+    Result := AMsg;
+  end;
+
+begin
+  AResolvido := False;
+  LChave := SoDigitos(ACupom.FieldByName('chavenfe').AsString);
+  if Length(LChave) <> 44 then
+  begin
+    AResolvido := True;
+    Exit('cupom sem chave de NFC-e');
+  end;
+
+  LQry := TUniQuery.Create(nil);
+  try
+    LQry.Connection := AConn;
+    AConn.StartTransaction;
+    try
+      // Pelo numtrans gravado no upload ou pela chave - nunca por filial+caixa+
+      // cupom, que pode casar com outra venda e aqui cancelaria a nota errada
+      LQry.SQL.Text :=
+        'SELECT numtrans_erp, codoper FROM msapolo_venda WHERE ' +
+        IfThen(ACupom.FieldByName('numtrans').AsLargeInt > 0,
+          'numtrans = :numtrans', 'chavenfe = :chavenfe') +
+        ' FOR UPDATE WAIT 20';
+      if ACupom.FieldByName('numtrans').AsLargeInt > 0 then
+        LQry.ParamByName('numtrans').AsLargeInt := ACupom.FieldByName('numtrans').AsLargeInt
+      else
+        LQry.ParamByName('chavenfe').AsString := LChave;
+      LQry.Open;
+      if LQry.IsEmpty then
+        Exit(Fim('a venda nao subiu para a retaguarda', True));
+      if LQry.FieldByName('codoper').AsString <> 'C' then
+        Exit(Fim('a venda ainda nao esta cancelada na retaguarda', False));
+      if LQry.FieldByName('numtrans_erp').IsNull then
+        Exit(Fim('a venda nao tem nota no ERP',
+          ACupom.FieldByName('min_cancelada').AsFloat > MIN_ESPERA_JOB));
+      LNumTransErp := LQry.FieldByName('numtrans_erp').AsLargeInt;
+      LQry.Close;
+
+      LQry.SQL.Text := 'SELECT chavenfe, dtcancel, posicao FROM msnf WHERE numtrans = :numtrans';
+      LQry.ParamByName('numtrans').AsLargeInt := LNumTransErp;
+      LQry.Open;
+      if LQry.IsEmpty then
+        Exit(Fim(Format('a nota %d nao existe na MSNF', [LNumTransErp]), True));
+      if (not LQry.FieldByName('dtcancel').IsNull) or
+         (LQry.FieldByName('posicao').AsString = 'C') then
+        Exit(Fim(Format('a nota %d ja estava cancelada', [LNumTransErp]), True));
+      LChaveNF := SoDigitos(LQry.FieldByName('chavenfe').AsString);
+      if LChaveNF <> LChave then
+        Exit(Fim(Format('a nota %d esta com outra chave (%s); cancele pela ROT7006',
+          [LNumTransErp, LChaveNF]), False));
+      LQry.Close;
+
+      Result := ValidarCancelamentoNF(AConn, LNumTransErp);
+      if Result <> '' then
+        Exit(Fim(Format('nota %d: %s', [LNumTransErp, Result]), False));
+
+      // Mesmo motivo que a ROT7006 escolhe
+      LQry.SQL.Text :=
+        'SELECT MAX(c.id) KEEP (DENSE_RANK FIRST ORDER BY ' +
+        '  CASE WHEN c.codoper = n.codoper THEN 0 ELSE 1 END, ' +
+        '  CASE WHEN UPPER(c.motivo) LIKE ''ERRO DE DIGIT%'' THEN 0 ELSE 1 END, c.id) idmotivo ' +
+        'FROM mscadmotivo c, msnf n WHERE c.cancelamento = ''S'' AND n.numtrans = :numtrans';
+      LQry.ParamByName('numtrans').AsLargeInt := LNumTransErp;
+      LQry.Open;
+      LIdMotivo := LQry.Fields[0].AsInteger;
+      LQry.Close;
+      if LIdMotivo = 0 then
+        Exit(Fim('nao ha motivo de cancelamento cadastrado (MSCADMOTIVO com CANCELAMENTO = S)', False));
+
+      LMatricula := ACupom.FieldByName('cancelado_por').AsInteger;
+      if LMatricula = 0 then
+        LMatricula := ACupom.FieldByName('codoperador').AsInteger;
+
+      CancelarNotaFiscalNoSistema(AConn, LNumTransErp,
+        'PDV: ' + ACupom.FieldByName('justificativa_cancel').AsString,
+        LIdMotivo, LMatricula, ROTINA_PDV, False);
+
+      if OracleTemColuna(AConn, 'msnf', 'numprotocolo_canc') then
+      begin
+        LQry.SQL.Text :=
+          'UPDATE msnf SET numprotocolo_canc = :prot ' +
+          'WHERE numtrans = :numtrans AND dtcancel IS NOT NULL';
+        LQry.ParamByName('prot').AsString := ACupom.FieldByName('protocolo_cancelamento').AsString;
+        LQry.ParamByName('numtrans').AsLargeInt := LNumTransErp;
+        LQry.ExecSQL;
+      end;
+
+      AConn.Commit;
+      AResolvido := True;
+      Result := '';
+      SyncLog('CANCEL ERP cupom=%d: nota %d cancelada no ERP',
+        [ACupom.FieldByName('id').AsInteger, LNumTransErp]);
+    except
+      if AConn.InTransaction then
+        AConn.Rollback;
+      raise;
+    end;
+  finally
+    LQry.Free;
+  end;
+end;
+
+{ Fila do cancelamento no ERP. O que nao pode ser cancelado agora (titulo
+  baixado no acerto, chave divergente) continua na fila e e tentado de novo a
+  cada ciclo; os mais antigos sem tentativa vao primeiro, para um bloqueado
+  nunca segurar os outros. }
+procedure TSincronizador.CancelarNotasNoErp(AConn: TUniConnection);
+const
+  MAX_POR_CICLO = 20;
+var
+  LCupons: TUniQuery;
+  LMsg: string;
+  LResolvido: Boolean;
+  LCupomId: Integer;
+begin
+  if not AConn.Connected then Exit;
+  if FRetaguardaSemVenda then Exit;
+
+  LCupons := FSQLite.ExecutarSelect(
+    'SELECT c.id, c.numtrans, c.chavenfe, c.codoperador, c.cancelado_por, ' +
+    'c.justificativa_cancel, c.protocolo_cancelamento, ' +
+    'COALESCE(e.mensagem, '''') AS mensagem, ' +
+    '(julianday(''now'',''localtime'') - julianday(c.dthr_cancelamento)) * 1440.0 AS min_cancelada ' +
+    'FROM cancelamento_erp e JOIN cupons c ON c.id = e.cupom_id ' +
+    'WHERE e.situacao = 0 AND c.cancelada = 1 AND c.cancel_enviado = 1 ' +
+    'ORDER BY COALESCE(e.dthr_tentativa, ''''), c.id LIMIT ' + IntToStr(MAX_POR_CICLO));
+  try
+    while not LCupons.Eof do
+    begin
+      LCupomId := LCupons.FieldByName('id').AsInteger;
+      try
+        LMsg := CancelarNotaNoErp(AConn, LCupons, LResolvido);
+      except
+        on E: Exception do
+        begin
+          LResolvido := False;
+          LMsg := E.Message;
+        end;
+      end;
+
+      // Mesmo impedimento de novo (ate o titulo ser estornado): nao repete o log
+      if (LMsg <> '') and (LMsg <> LCupons.FieldByName('mensagem').AsString) then
+        SyncLog('CANCEL ERP cupom=%d: %s%s', [LCupomId, LMsg,
+          IfThen(LResolvido, '', ' (continua na fila)')]);
+      if LResolvido then
+        RegistrarLog('cancelamento_erp', 'UPLOAD', IntToStr(LCupomId), 'OK', LMsg)
+      else if LMsg <> LCupons.FieldByName('mensagem').AsString then
+        RegistrarLog('cancelamento_erp', 'UPLOAD', IntToStr(LCupomId), 'ERRO', LMsg);
+
+      try
+        FSQLite.ExecutarSQL(
+          'UPDATE cancelamento_erp SET situacao = ' + IfThen(LResolvido, '1', '0') + ', ' +
+          'mensagem = :p0, tentativas = tentativas + 1, ' +
+          'dthr_tentativa = datetime(''now'',''localtime'') WHERE cupom_id = :p1',
+          [LMsg, LCupomId]);
+      except
+        // Fica para o proximo ciclo: a nota cancelada sera vista como ja cancelada
+        on E: Exception do
+          SyncLog('CANCEL ERP cupom=%d: marcacao local - %s', [LCupomId, E.Message]);
+      end;
+
+      if not AConn.Connected then Exit;
+      LCupons.Next;
+    end;
+  finally
+    LCupons.Free;
+  end;
+end;
+
 procedure TSincronizador.AtualizarChavesNoOracle(AConn: TUniConnection);
 const
   MAX_POR_CICLO = 200;
@@ -2133,14 +2711,18 @@ begin
   FSincronizando := True;
   LSw := TStopwatch.StartNew;
   try
+    ReabrirVendasEnviadasAbertas;
+
     LPend := FSQLite.ExecutarScalar(
-      'SELECT COUNT(*) FROM cupons WHERE sincronizado = 0 AND codoper = ''V''');
+      'SELECT COUNT(*) FROM cupons WHERE sincronizado = 0 AND codoper IN (''V'', ''O'') ' +
+      'AND ' + SQL_CUPOM_ENCERRADO);
     if (not VarIsNull(LPend)) and (Integer(LPend) > 0) then
       SyncLog('PENDENTES: %d venda(s) aguardando upload', [Integer(LPend)]);
 
     EnviarVendasPendentes(AConn);
     AtualizarChavesNoOracle(AConn);
     UploadCancelamentos(AConn);
+    CancelarNotasNoErp(AConn);
     EnviarDocEletronicosPendentes(AConn);
     EnviarNumerarioPendente(AConn);
 
@@ -2173,7 +2755,9 @@ begin
     // falha voltaria no lote seguinte e prenderia o laco. Quem falhou fica
     // para o proximo ciclo de retry.
     LQuery := FSQLite.ExecutarSelect(
-      'SELECT id FROM cupons WHERE sincronizado = 0 AND codoper = ''V'' ' +
+      // 'O' = orcamento: sobe igual a venda; a MSAPOLO_GERAR_NF gera MSNF posicao 'O'
+      'SELECT id FROM cupons WHERE sincronizado = 0 AND codoper IN (''V'', ''O'') ' +
+      'AND ' + SQL_CUPOM_ENCERRADO + ' ' +
       'AND id > ' + IntToStr(LUltimoId) + ' ORDER BY id LIMIT ' + IntToStr(TAM_LOTE)
     );
     try
@@ -2362,6 +2946,53 @@ begin
   end;
 end;
 
+{ Trava a venda do cupom no Oracle (dentro da transacao aberta), para o
+  "ja existe?" e o INSERT do XML valerem como um passo so. Sem a trava dois
+  envios simultaneos contam zero e gravam os dois: o mesmo XML com NUMTRANS
+  consecutivos, e o job falhava para sempre (ORA-00001 PK_MSDOCELETRONICO).
+  O job MSAPOLO_GERAR_NF trava a mesma linha: o XML nao sobe no meio da
+  geracao da nota. Venda que ainda nao subiu: trava o caixa desta maquina. }
+procedure TSincronizador.TravarVendaNoOracle(AConn: TUniConnection;
+  ANumTransVenda: Int64; const AChave: string);
+var
+  LQry: TUniQuery;
+  LAchou: Boolean;
+begin
+  LQry := TUniQuery.Create(nil);
+  try
+    LQry.Connection := AConn;
+    LAchou := False;
+    try
+      LQry.SQL.Text := 'SELECT numtrans FROM msapolo_venda WHERE ' +
+        IfThen(ANumTransVenda > 0, 'numtrans = :numtrans', 'chavenfe = :chavenfe') +
+        ' FOR UPDATE WAIT 30';
+      if ANumTransVenda > 0 then
+        LQry.ParamByName('numtrans').AsLargeInt := ANumTransVenda
+      else
+        LQry.ParamByName('chavenfe').AsString := AChave;
+      LQry.Open;
+      LAchou := not LQry.IsEmpty;
+      LQry.Close;
+    except
+      // Retaguarda sem a msapolo_venda: o XML sobe do mesmo jeito
+      on E: Exception do
+        if Pos('ORA-00942', E.Message) = 0 then
+          raise;
+    end;
+
+    if not LAchou then
+    begin
+      LQry.SQL.Text := 'SELECT numcaixa FROM msapolo_caixa ' +
+        'WHERE numseriehd = :numseriehd FOR UPDATE WAIT 30';
+      LQry.ParamByName('numseriehd').AsString := FSQLite.ObterEstado(KEY_HD_SERIAL, '');
+      LQry.Open;
+      LQry.Close;
+    end;
+  finally
+    LQry.Free;
+  end;
+end;
+
 procedure TSincronizador.UploadDocEletronico(AConn: TUniConnection; ACupomId: Integer);
 var
   LCupom: TUniQuery;
@@ -2373,6 +3004,8 @@ var
   LXmlPath: string;
   LStream: TStringStream;
   NumTrans: Double;
+  LNtNota: Int64;
+  LMsgReligou: string;
   LSw: TStopwatch;
 begin
   if not AConn.Connected then Exit;
@@ -2381,7 +3014,7 @@ begin
   try
     // Ler dados do cupom no SQLite
     LCupom := FSQLite.ExecutarSelect(
-      'SELECT chavenfe, numnota, dthriniciovenda, dthrfimvenda ' +
+      'SELECT chavenfe, numnota, numtrans, dthriniciovenda, dthrfimvenda ' +
       'FROM cupons WHERE id = ' + IntToStr(ACupomId)
     );
     try
@@ -2425,33 +3058,59 @@ begin
       try
         LInsert.Connection := AConn;
 
-        // Verificar duplicidade pela chavenfe
+        // Da conferencia ate o INSERT e uma transacao so, com a venda travada
+        AConn.StartTransaction;
+        try
+        TravarVendaNoOracle(AConn, LCupom.FieldByName('numtrans').AsLargeInt, LChaveNFe);
+
+        // Verificar duplicidade pela chavenfe. So o XML da nota: o evento de
+        // cancelamento (tipo 'C') da mesma chave nao conta como XML enviado
         LInsert.SQL.Text :=
-          'SELECT COUNT(*) QTD FROM msdoceletronico WHERE chavenfe = :chavenfe';
+          'SELECT COUNT(*) QTD FROM msdoceletronico ' +
+          'WHERE chavenfe = :chavenfe AND NVL(tipo, ''P'') <> ''C''';
         LInsert.ParamByName('chavenfe').AsString := LChaveNFe;
         LInsert.Open;
         if LInsert.FieldByName('QTD').AsInteger > 0 then
         begin
-          // Ja existe no Oracle, apenas marcar como enviado no SQLite
+          // Ja existe no Oracle: se ficou no NUMTRANS do PDV (subiu depois da
+          // nota), passa para o da MSNF. Falha aqui nao impede a marcacao
+          LMsgReligou := '';
+          try
+            LNtNota := ReligarXmlNaNota(AConn, LChaveNFe);
+            if LNtNota > 0 then
+              LMsgReligou := ' (religado a nota ' + IntToStr(LNtNota) + ')';
+          except
+            on E: Exception do
+              SyncLog('UPLOAD doceletronico cupom=%d: religar a nota falhou: %s',
+                [ACupomId, E.Message]);
+          end;
+          AConn.Commit;
           FSQLite.ExecutarSQL(
             'UPDATE cupons SET doceletronico_enviado = 1 WHERE id = ' +
             IntToStr(ACupomId)
           );
           RegistrarLog('doceletronico', 'UPLOAD', IntToStr(ACupomId), 'OK',
-            'Ja existia no Oracle');
+            'Ja existia no Oracle' + LMsgReligou);
           Exit;
         end;
         LInsert.Close;
 
-        LNumTrans := TUniQuery.Create(nil);
-        try
-          LNumTrans.Connection := AConn;
-          LNumTrans.SQL.Text:='SELECT SEQ_PROX_NUMTRANS_MOV.nextval FROM DUAL';
-          LNumTrans.Open;
-          NumTrans:=LNumTrans.Fields[0].AsFloat;
-        finally
-          LNumTrans.Close;
-          LNumTrans.Free;
+        // O XML fica no NUMTRANS da nota (MSNF). Ela so nao existe ainda
+        // quando o XML sobe antes do job MSAPOLO_GERAR_NF: ai vai um NUMTRANS
+        // novo e o passo 4.7 do job religa ao criar a nota
+        NumTrans := NumTransNotaSemXml(AConn, LChaveNFe);
+        if NumTrans = 0 then
+        begin
+          LNumTrans := TUniQuery.Create(nil);
+          try
+            LNumTrans.Connection := AConn;
+            LNumTrans.SQL.Text:='SELECT SEQ_PROX_NUMTRANS_MOV.nextval FROM DUAL';
+            LNumTrans.Open;
+            NumTrans:=LNumTrans.Fields[0].AsFloat;
+          finally
+            LNumTrans.Close;
+            LNumTrans.Free;
+          end;
         end;
 
 
@@ -2482,6 +3141,12 @@ begin
         end;
 
         LInsert.ExecSQL;
+        AConn.Commit;
+        except
+          if AConn.InTransaction then
+            AConn.Rollback;
+          raise;
+        end;
 
         // Marcar como enviado ANTES do log do cupom: o registro fiscal
         // (msdoceletronico) ja esta gravado. Deixar para depois fazia uma

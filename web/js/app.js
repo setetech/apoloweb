@@ -191,6 +191,9 @@ const ApoloApp = {
         if (data.tefHabilitado !== undefined) {
           Payment.aplicarConfigTEF(data.tefHabilitado, data.tefPixQrTela);
         }
+        if (data.orcamentoValidadeDias !== undefined) {
+          Payment.aplicarConfigOrcamento(data.orcamentoValidadeDias);
+        }
         this.mostrarVersao(data.versaoExe || data.versao);
         // Dados iniciais do sistema
         if (data.operador && data.estadoCaixa > 0) {
@@ -245,6 +248,15 @@ const ApoloApp = {
         // Resultado do CNC disparado pela aba TEF
         TEFInterativo.fechar();
         TEFAdm.onResultadoEstorno(data);
+        break;
+
+      case 'atualizacaoProgresso':
+        // Download da nova versao (aba Atualizacao)
+        AtualizacaoVersao.onProgresso(data);
+        break;
+
+      case 'atualizacaoResultado':
+        AtualizacaoVersao.onResultado(data);
         break;
 
       default:

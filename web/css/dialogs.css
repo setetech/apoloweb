@@ -35,6 +35,57 @@
   border-color: var(--accent-primary);
 }
 
+/* Campo do dialogo generico + alternador R$ / % do desconto */
+.dialog-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.dialog-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.desc-tipo {
+  display: flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.desc-tipo.hidden { display: none; }
+
+.desc-tipo button {
+  min-width: 48px;
+  padding: 0 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: none;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.desc-tipo button + button { border-left: 1px solid var(--border-color); }
+.desc-tipo button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.desc-tipo button.ativo {
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.desc-preview {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.desc-preview.hidden { display: none; }
+.desc-preview strong { color: var(--text-primary); }
+.desc-preview.erro, .desc-preview.erro strong { color: var(--accent-danger); }
+
 /* Contingencia indicator bar */
 .contingencia-bar {
   display: none;
