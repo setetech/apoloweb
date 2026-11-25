@@ -103,8 +103,8 @@ async function principal() {
   const manual = todos.filter(m => m.tipo === 'MD' && String(m.rotina || '') === d.rotina)
     .sort((a, b) => Number(b.versao) - Number(a.versao))[0];
   const visivel = args.includes('--equipe') ? 'N' : (manual ? manual.visivel_cliente : 'S');
-  const atual = todos.filter(m => m.tipo === 'VIDEO' && String(m.rotina || '') === d.rotina)
-    .sort((a, b) => (b.nome_arq === nomeArq) - (a.nome_arq === nomeArq))[0];
+  // Só o vídeo da rotina com o MESMO arquivo é "este" vídeo (antes, qualquer VIDEO da rotina era sobrescrito).
+  const atual = todos.find(m => m.tipo === 'VIDEO' && String(m.rotina || '') === d.rotina && m.nome_arq === nomeArq);
   let videoId, situacao;
   if (atual && atual.nome_arq === nomeArq && Number(atual.tamanho) === bytes.length && atual.titulo === d.titulo) {
     videoId = Number(atual.id); situacao = 'sem mudança';
